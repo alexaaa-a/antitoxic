@@ -46,11 +46,33 @@ def kick_user(message):
 
 @bot.message_handler(['mute'])
 def mutie(message):
-    if message.reply_to_message is not None:
+    if message.reply_to_message:
+        chat_id = message.chat.id
         user_id = message.reply_to_message.from_user.id
-        bot.reply_to(message, f'Токсик {user_id} замьючен!')
+        user_status = bot.get_chat_member(chat_id, user_id).status
+        if user_status == 'administrator' or user_status == 'creator':
+            bot.reply_to(message, "Я не буду мьютить моего любимого создателя!!")
+        else:
+            duration = 60
+            args = message.text.split()[1:]
+            if args:
+                try:
+                    duration = int(args[0])
+                except ValueError:
+                    bot.reply_to(message, "Неверное время!")
+                    return
+                if duration < 1:
+                    bot.reply_to(message, "Время должно быть положительным числом! Учите матешу")
+                    return
+                if duration > 1440:
+                    bot.reply_to(message, "Максимальное время - 1 день, потом все")
+                    return
+            bot.restrict_chat_member(chat_id, user_id, until_date=time.time() + duration * 60)
+            bot.reply_to(message,
+                         f"Токсик {message.reply_to_message.from_user.username} замьючен на {duration} минут!")
     else:
-        bot.reply_to(message, 'Эта команда должна быть использована в ответ на сообщение токсика!')
+        bot.reply_to(message,
+                     "Эта команда должна быть использована в ответ на сообщение токсика, которого ты хочешь замьютить")
 
 @bot.message_handler(commands=['unmute'])
 def unmutie(message):
@@ -62,7 +84,7 @@ def unmutie(message):
     else:
         bot.reply_to(message, "Эта команда должна быть использована в ответ на сообщение человечка, которого ты хочешь размьютить")
 
-bad_phrases = ['дура', 'клоун', 'как жаль', 'я же говорил', 'иди на', 'иди в ж', 'фу', 'дурак']
+bad_phrases = ['дура', 'клоун', 'как жаль', 'я же говорил', 'иди на', 'иди в ж', 'фу']
 
 
 
