@@ -72,15 +72,5 @@ def messages_of_toxic(message):
         if i in message.text:
             user_id = message.from_user.id
             bot.reply_to(message, 'Фу, токсик! +1 в твою копилку токсичных сообщений, отстоооой')
-            stats[user_id] = 1
-
-@bot.message_handler(['stats'])
-def stats_of_chat(message):
-    if len(stats) > 0:
-        for key in stats:
-            for value in stats:
-                bot.reply_to(message, f'Токсик с id {key} натоксичил сегодня {value} раз, отстой!')
-    else:
-        bot.reply_to(message, 'Пусто блин!')
 
 bot.infinity_polling(none_stop=True)
