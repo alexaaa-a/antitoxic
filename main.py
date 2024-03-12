@@ -1,6 +1,4 @@
-import asyncio
 import logging
-from db import get_chat_members
 import datetime
 
 from aiogram import Dispatcher
@@ -43,6 +41,37 @@ async def main():
 async def admin_promoted(event: ChatMemberUpdated, admins: set[int]):
     admins.add(event.new_chat_member.user.id)
 
+async def create_table():
+    try:
+        async with aiosqlite.connect('chat_members.db') as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS members (
+                        chat_id INTEGER,
+                        member_id INTEGER
+                    )
+                ''')
+                await conn.commit()
+    except Exception as e:
+        print(f"Error creating table: {e}")
+
+async def add_members_to_database(chat_id: int, member_ids: list):
+    await create_table()  # Проверка на существование таблицф
+
+    try:
+        async with aiosqlite.connect('chat_members.db') as conn:
+            async with conn.cursor() as cursor:
+                for member_id in member_ids:
+                    await cursor.execute('''
+                        INSERT INTO members (chat_id, member_id)
+                        VALUES (?, ?)
+                    ''', (chat_id, member_id))
+
+                await conn.commit()
+
+    except Exception as e:
+        print(f"Error adding members to database: {e}")
+
 @router.message(Command('parse'))
 async def parse_members(msg: types.Message):
     if msg.reply_to_message:
@@ -50,19 +79,8 @@ async def parse_members(msg: types.Message):
         chat_members = await get_chat_members(chat_id)
         await msg.answer(f'Участники чата: {chat_members}')
 
-        try:
-            # Подключаемся к базе данных SQLite
-            async with aiosqlite.connect('chat_members.db') as conn:
-                # Создаем курсор для выполнения SQL-запросов
-                async with conn.cursor() as cursor:
-                    # Добавляем ID участников в базу данных
-                    for member_id in chat_members:
-                        await cursor.execute('''
-                            INSERT INTO chat_members.db (chat_id, member_id)
-                            VALUES (?, ?)
-                        ''', (chat_id, member_id))
-
-                    await conn.commit()
+        # Добавляем участников в базу данных
+        await add_members_to_database(chat_id, chat_members)
 
         except Exception as e:
             print(f"Error adding members to database: {e}")
