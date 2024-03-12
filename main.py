@@ -1,6 +1,6 @@
 import logging
+from db import get_chat_members
 import datetime
-
 from aiogram import Dispatcher
 from aiogram.enums.parse_mode import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -11,17 +11,34 @@ from aiogram.filters.chat_member_updated import \
     ChatMemberUpdatedFilter, KICKED, LEFT, \
     RESTRICTED, MEMBER, ADMINISTRATOR, CREATOR
 from aiogram.types import ChatMemberUpdated
-
 from aiogram.filters.command import Command
 import asyncio
 import aiosqlite
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 admins = {}
 router = Router()
 
+@router.message(F.text.lower() == 'привет')
+async def welcome(message: Message):
+    await message.answer('Напиши /start, и мы начнем!')
+
 @router.message(Command("start"))
 async def start_handler(msg: Message):
+    kb = [
+        [
+            types.KeyboardButton(text="/ban"),
+            types.KeyboardButton(text="/unban"),
+            types.KeyboardButton(text="/mute"),
+            types.KeyboardButton(text="/parse")
+        ],
+    ]
+    keyboard = types.ReplyKeyboardMarkup(
+        keyboard=kb,
+        resize_keyboard=True,
+    )
     await msg.answer('Мяяу!! Я - бот для определения токсиков и душнил в твоих чатах :) Выбери нужную кнопочку и жмякни по ней!')
+    await msg.answer('Кнопочки для вас, мои котики!', reply_markup=keyboard)
 
 
 async def main():
@@ -79,53 +96,49 @@ async def parse_members(msg: types.Message):
         chat_members = await get_chat_members(chat_id)
         await msg.answer(f'Участники чата: {chat_members}')
 
-        # Добавляем участников в базу данных
         await add_members_to_database(chat_id, chat_members)
-
-        except Exception as e:
-            print(f"Error adding members to database: {e}")
-
 
 
 @router.message(Command('ban'))
 async def ban_toxic(msg: Message):
     if msg.reply_to_message:
-        user_id = msg.from_user.id
-        chat_id = msg.chat.id
+        user_id = msg.reply_to_message.from_user.id
+        username = msg.reply_to_message.from_user.first_name
         if user_id in admins:
             await msg.answer('Я не хочу банить моего любимого создателя!!')
         else:
-            await msg.chat.ban(user_id=msg.reply_to_message.from_user.id)
-            await msg.answer(f'Токсик {user_id} забанен! Давайте вместе бороться с токсичностью!')
+            await msg.chat.ban(user_id=user_id)
+            await msg.answer(f'Токсик tg://user?{username} забанен! Давайте вместе бороться с токсичностью!')
     else:
         await msg.answer('Если ты хочешь забанить токсика, ответь на его сообщение')
 
 @router.message(Command('unban'))
 async def unban_toxic(msg: Message):
     if msg.reply_to_message:
-        user_id = msg.from_user.id
-        if user_id in admins:
-            await msg.answer('Я не хочу банить моего любимого создателя!!')
-        else:
-            await msg.chat.unban(user_id=msg.reply_to_message.from_user.id)
-            await msg.answer(f'Токсик {user_id} разбанен!!')
+        user_id = msg.reply_to_message.from_user.id
+        username = msg.reply_to_message.from_user.first_name
+        await msg.chat.unban(user_id=user_id)
+        await msg.answer(f'Токсик @{username} разбанен!!')
     else:
         await msg.answer('Если ты хочешь разбанить токсика, ответь на его сообщение')
 
 @router.message(Command('mute'))
 async def mutie(msg: Message):
     if msg.reply_to_message:
-        user_id = msg.from_user.id
+        bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
+        user_id = msg.reply_to_message.from_user.id
+        username = msg.reply_to_message.from_user.first_name
         chat_id = msg.chat.id
+        permissions = types.ChatPermissions(can_send_messages=False, can_send_media_messages=False, can_send_polls=False,
+                                      can_send_other_messages=False)
+
         if user_id in admins:
             await msg.answer('Я не хочу мьютить моего любимого создателя!!')
         else:
-            await Bot.restrict_chat_member(chat_id, user_id, types.ChatPermissions(can_send_message=False), until_date=datetime.timedelta(hours=1))
-            await msg.answer(f'Токсик {user_id} замьючен!')
+            await bot.restrict_chat_member(chat_id=chat_id, user_id=user_id, permissions=permissions, use_independent_chat_permissions=False, until_date=datetime.timedelta(minutes=3))
+            await msg.answer(f'Токсик @{username} замьючен!')
     else:
         await msg.answer('Если ты хочешь замьютить токсика, ответь на его сообщение')
-
-
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
