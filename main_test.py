@@ -88,8 +88,8 @@ async def add_word_to_database(word: str):
         print(f"Error adding word to database: {e}")
 
 @router.message(Command('new'))
-async def add_new_word(msg: types.Message):
-    word = msg.get_args()
+async def add_new_word(msg: types.Message, command: Command):
+    word = command.args
     if word:
         await add_word_to_database(word)
         await msg.answer(f'Слово "{word}" добавленно в базу.')
