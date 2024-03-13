@@ -30,8 +30,7 @@ async def start_handler(msg: Message):
             types.KeyboardButton(text="/ban"),
             types.KeyboardButton(text="/unban"),
             types.KeyboardButton(text="/mute"),
-            types.KeyboardButton(text="/parse"),
-            types.KeyboardButton(text='/new')
+            types.KeyboardButton(text="/parse")
         ],
     ]
     keyboard = types.ReplyKeyboardMarkup(
@@ -112,7 +111,7 @@ async def create_table():
         print(f"Error creating table: {e}")
 
 async def add_members_to_database(chat_id: int, member_ids: list):
-    await create_table()
+    await create_table()  # Проверка на существование таблицф
 
     try:
         async with aiosqlite.connect('chat_members.db') as conn:
@@ -129,14 +128,13 @@ async def add_members_to_database(chat_id: int, member_ids: list):
         print(f"Error adding members to database: {e}")
 
 @router.message(Command('parse'))
-async def parse_members(msg: Message):
+async def parse_members(msg: types.Message):
     if msg.reply_to_message:
         chat_id = msg.chat.id
         chat_members = await get_chat_members(chat_id)
         await msg.answer(f'Участники чата: {chat_members}')
 
         await add_members_to_database(chat_id, chat_members)
-
 
 @router.message(Command('ban'))
 async def ban_toxic(msg: Message):
@@ -147,7 +145,7 @@ async def ban_toxic(msg: Message):
             await msg.answer('Я не хочу банить моего любимого создателя!!')
         else:
             await msg.chat.ban(user_id=user_id)
-            await msg.answer(f'Токсик tg://user?{username} забанен! Давайте вместе бороться с токсичностью!')
+            await msg.answer(f'Токсик {username} забанен! Давайте вместе бороться с токсичностью!')
     else:
         await msg.answer('Если ты хочешь забанить токсика, ответь на его сообщение')
 
@@ -157,7 +155,7 @@ async def unban_toxic(msg: Message):
         user_id = msg.reply_to_message.from_user.id
         username = msg.reply_to_message.from_user.first_name
         await msg.chat.unban(user_id=user_id)
-        await msg.answer(f'Токсик @{username} разбанен!!')
+        await msg.answer(f'Токсик {username} разбанен!!')
     else:
         await msg.answer('Если ты хочешь разбанить токсика, ответь на его сообщение')
 
@@ -175,7 +173,7 @@ async def mutie(msg: Message):
             await msg.answer('Я не хочу мьютить моего любимого создателя!!')
         else:
             await bot.restrict_chat_member(chat_id=chat_id, user_id=user_id, permissions=permissions, use_independent_chat_permissions=False, until_date=datetime.timedelta(minutes=3))
-            await msg.answer(f'Токсик @{username} замьючен!')
+            await msg.answer(f'Токсик {username} замьючен!')
     else:
         await msg.answer('Если ты хочешь замьютить токсика, ответь на его сообщение')
 
