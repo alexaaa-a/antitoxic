@@ -30,7 +30,8 @@ async def start_handler(msg: Message):
             types.KeyboardButton(text="/ban"),
             types.KeyboardButton(text="/unban"),
             types.KeyboardButton(text="/mute"),
-            types.KeyboardButton(text="/parse")
+            types.KeyboardButton(text="/parse"),
+            types.KeyboardButton(text='/new')
         ],
     ]
     keyboard = types.ReplyKeyboardMarkup(
@@ -58,6 +59,44 @@ async def main():
 async def admin_promoted(event: ChatMemberUpdated, admins: set[int]):
     admins.add(event.new_chat_member.user.id)
 
+async def create_table_words():
+    try:
+        async with aiosqlite.connect('words.db') as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS words (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        word TEXT
+                    )
+                ''')
+                await conn.commit()
+    except Exception as e:
+        print(f"Error creating table: {e}")
+
+async def add_word_to_database(word: str):
+    await create_table_words()
+
+    try:
+        async with aiosqlite.connect('words.db') as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute('''
+                    INSERT INTO words (word)
+                    VALUES (?)
+                ''', (word,))
+                await conn.commit()
+    except Exception as e:
+        print(f"Error adding word to database: {e}")
+
+@router.message(Command('new'))
+async def add_new_word(msg: Message, command: Command):
+    word = command.args
+    if word:
+        await add_word_to_database(word)
+        await msg.answer(f'Слово "{word}" добавленно в базу.')
+    else:
+        await msg.answer('Пожалуйста, напиши слово, которое ты хочешь добавить в базу, после команды')
+
+
 async def create_table():
     try:
         async with aiosqlite.connect('chat_members.db') as conn:
@@ -73,7 +112,7 @@ async def create_table():
         print(f"Error creating table: {e}")
 
 async def add_members_to_database(chat_id: int, member_ids: list):
-    await create_table()  # Проверка на существование таблицф
+    await create_table()
 
     try:
         async with aiosqlite.connect('chat_members.db') as conn:
@@ -90,7 +129,7 @@ async def add_members_to_database(chat_id: int, member_ids: list):
         print(f"Error adding members to database: {e}")
 
 @router.message(Command('parse'))
-async def parse_members(msg: types.Message):
+async def parse_members(msg: Message):
     if msg.reply_to_message:
         chat_id = msg.chat.id
         chat_members = await get_chat_members(chat_id)
