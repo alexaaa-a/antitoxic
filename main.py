@@ -121,7 +121,7 @@ async def parse_members(msg: Message):
     chat_id = msg.chat.id
     chat_members = await get_chat_members(chat_id)
     await msg.answer(f'Участники чата: {chat_members}')
-    await add_members_to_database(chat_id, chat_members)
+    await add_members_to_database(chat_id, chat_members, points=0)
 
 async def add_members_to_database(chat_id: int, member_ids: list, points: int):
     await create_table()  # Проверка на существование таблицы
@@ -132,7 +132,7 @@ async def add_members_to_database(chat_id: int, member_ids: list, points: int):
                 for member_id in member_ids:
                     await cursor.execute('''
                         INSERT INTO members (chat_id, member_id, points)
-                        VALUES (?, ?, 0)
+                        VALUES (?, ?, ?)
                     ''', (chat_id, member_id, points))
 
                 await conn.commit()
