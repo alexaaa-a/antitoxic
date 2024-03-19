@@ -1,4 +1,7 @@
 import logging
+
+import aiogram.exceptions
+
 from db import get_chat_members
 import datetime
 from aiogram import Dispatcher
@@ -7,6 +10,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 import config
 from aiogram import types, F, Router, Bot
 from aiogram.types import Message
+from aiogram.methods import GetChatAdministrators
 from aiogram.filters.chat_member_updated import \
     ChatMemberUpdatedFilter, KICKED, LEFT, \
     RESTRICTED, MEMBER, ADMINISTRATOR, CREATOR
@@ -14,7 +18,7 @@ from aiogram.types import ChatMemberUpdated
 from aiogram.filters.command import Command
 import asyncio
 import aiosqlite
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+
 
 admins = {}
 router = Router()
@@ -31,7 +35,8 @@ async def start_handler(msg: Message):
             types.KeyboardButton(text="/unban"),
             types.KeyboardButton(text="/mute"),
             types.KeyboardButton(text="/parse"),
-            types.KeyboardButton(text="/toxic")
+            types.KeyboardButton(text="/toxic"),
+            types.KeyboardButton(text="/points")
         ],
     ]
     keyboard = types.ReplyKeyboardMarkup(
@@ -105,7 +110,8 @@ async def create_table():
                     CREATE TABLE IF NOT EXISTS members (
                         chat_id INTEGER,
                         member_id INTEGER PRIMARY KEY,
-                        toxic_words TEXT
+                        toxic_words TEXT,
+                        points INTEGER
                     )
                 ''')
                 await conn.commit()
@@ -119,7 +125,7 @@ async def parse_members(msg: Message):
     await msg.answer(f'Участники чата: {chat_members}')
     await add_members_to_database(chat_id, chat_members)
 
-async def add_members_to_database(chat_id: int, member_ids: list):
+async def add_members_to_database(chat_id: int, member_ids: list, points: int):
     await create_table()  # Проверка на существование таблицы
 
     try:
@@ -127,9 +133,9 @@ async def add_members_to_database(chat_id: int, member_ids: list):
             async with conn.cursor() as cursor:
                 for member_id in member_ids:
                     await cursor.execute('''
-                        INSERT INTO members (chat_id, member_id)
-                        VALUES (?, ?)
-                    ''', (chat_id, member_id))
+                        INSERT INTO members (chat_id, member_id, points)
+                        VALUES (?, ?, 0)
+                    ''', (chat_id, member_id, points))
 
                 await conn.commit()
 
@@ -140,7 +146,6 @@ async def add_members_to_database(chat_id: int, member_ids: list):
 async def add_toxic_words(chat_id, member_id, toxic_words):
     await create_table()  # Проверка на существование таблицы
 
-
     try:
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
@@ -148,10 +153,12 @@ async def add_toxic_words(chat_id, member_id, toxic_words):
                     UPDATE members
                     SET toxic_words = ?
                     WHERE member_id = ? AND chat_id = ?
+
                 ''', (toxic_words, member_id, chat_id))
                 await conn.commit()
     except Exception as e:
         print(f"Error adding toxic words: {e}")
+
 
 @router.message(Command('toxic'))
 async def add_toxic_word(msg: Message):
@@ -159,22 +166,53 @@ async def add_toxic_word(msg: Message):
         chat_id = msg.chat.id
         member_id = msg.reply_to_message.from_user.id
         username = msg.reply_to_message.from_user.first_name
-        toxic_word = msg.reply_to_message.from_user #мб не так
+        toxic_word = msg.reply_to_message.text  # Получаем текст сообщения, к которому отвечают
         await add_toxic_words(chat_id, member_id, toxic_word)
-        await msg.reply(f"Слово '{toxic_word}' добавлено к пользователю {username} в базу данных.")
+        # Добавление +1 балла в столбец points для участника чата
+        async with aiosqlite.connect('chat_members.db') as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute('''
+                    UPDATE members
+                    SET points = points + 1
+                    WHERE member_id = ? AND chat_id = ?
+                ''', (member_id, chat_id))
+                await conn.commit()
+        await msg.answer(f"Слово '{toxic_word}' добавлено к пользователю {username} в базу данных и +1 балл участнику.")
     else:
         await msg.answer('Если ты хочешь добавить слово к токсику, ответь на его сообщение')
+
+
+@router.message(Command('points'))
+async def show_member_points(msg: Message):
+    try:
+        async with aiosqlite.connect('chat_members.db') as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute('SELECT username, points FROM members')
+                rows = await cursor.fetchall()
+
+                response = ''
+                for row in rows:
+                    username, points = row
+                    response += f'Участник с ID {username} имеет {points} балл(ов)\n'
+
+                await msg.answer(response, parse_mode=ParseMode.HTML)
+
+    except aiosqlite.Error as e:
+        logging.error(f'Ошибка при выполнении запроса: {e}')
+        await msg.answer('Произошла ошибка при выполнении запроса.')
+
 
 @router.message(Command('ban'))
 async def ban_toxic(msg: Message):
     if msg.reply_to_message:
         user_id = msg.reply_to_message.from_user.id
         username = msg.reply_to_message.from_user.first_name
-        if user_id in admins:
-            await msg.answer('Я не хочу банить моего любимого создателя!!')
-        else:
+        try:
             await msg.chat.ban(user_id=user_id)
             await msg.answer(f'Токсик {username} забанен! Давайте вместе бороться с токсичностью!')
+        except aiogram.exceptions.TelegramBadRequest as e:
+            logging.error(f'Ошибка при выполнении запроса: {e}')
+            await msg.answer('Я не хочу банить моего любимого админа!!')
     else:
         await msg.answer('Если ты хочешь забанить токсика, ответь на его сообщение')
 
@@ -197,12 +235,15 @@ async def mutie(msg: Message):
         chat_id = msg.chat.id
         permissions = types.ChatPermissions(can_send_messages=False, can_send_media_messages=False, can_send_polls=False,
                                       can_send_other_messages=False)
-
-        if user_id in admins:
-            await msg.answer('Я не хочу мьютить моего любимого создателя!!')
-        else:
-            await bot.restrict_chat_member(chat_id=chat_id, user_id=user_id, permissions=permissions, use_independent_chat_permissions=False, until_date=datetime.timedelta(minutes=3))
+        try:
+            await bot.restrict_chat_member(chat_id=chat_id, user_id=user_id, permissions=permissions,
+                                           use_independent_chat_permissions=False,
+                                           until_date=datetime.timedelta(minutes=3))
             await msg.answer(f'Токсик {username} замьючен!')
+
+        except aiogram.exceptions.TelegramBadRequest as e:
+            logging.error(f'Ошибка при выполнении запроса: {e}')
+            await msg.answer('Я не хочу мьютить моего любимого админа!!')
     else:
         await msg.answer('Если ты хочешь замьютить токсика, ответь на его сообщение')
 
