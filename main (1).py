@@ -183,19 +183,20 @@ async def show_member_points(msg: Message):
     try:
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute('SELECT username, points FROM members')
+                await cursor.execute('SELECT member_id, points FROM members')
                 rows = await cursor.fetchall()
 
                 response = ''
                 for row in rows:
-                    username, points = row
-                    response += f'Участник с ID {username} имеет {points} балл(ов)\n'
+                    member_id, points = row
+                    response += f'Участник с ID {member_id} имеет {points} балл(ов)\n'
 
                 await msg.answer(response, parse_mode=ParseMode.HTML)
 
     except aiosqlite.Error as e:
         logging.error(f'Ошибка при выполнении запроса: {e}')
         await msg.answer('Произошла ошибка при выполнении запроса.')
+
 
 
 @router.message(Command('ban'))
