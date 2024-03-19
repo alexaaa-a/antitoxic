@@ -124,9 +124,9 @@ async def parse_members(msg: Message):
     await add_members_to_database(chat_id, chat_members, points=0)
 
 async def add_members_to_database(chat_id: int, member_ids: list, points: int):
-    await create_table()  # Проверка на существование таблицы
-
     try:
+        await create_table()  # Проверка на существование таблицы
+
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
                 for member_id in member_ids:
@@ -142,20 +142,18 @@ async def add_members_to_database(chat_id: int, member_ids: list, points: int):
 
 
 async def add_toxic_words(chat_id, member_id, toxic_words):
-    await create_table()  # Проверка на существование таблицы
-
     try:
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute('''
-                    UPDATE members
-                    SET toxic_words = ?
-                    WHERE member_id = ? AND chat_id = ?
-
-                ''', (toxic_words, member_id, chat_id))
+                    INSERT INTO members (chat_id, member_id, toxic_words)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(chat_id, member_id) DO UPDATE SET toxic_words = ?
+                ''', (chat_id, member_id, toxic_words, toxic_words))
                 await conn.commit()
     except Exception as e:
         print(f"Error adding toxic words: {e}")
+
 
 
 @router.message(Command('toxic'))
