@@ -30,7 +30,8 @@ async def start_handler(msg: Message):
             types.KeyboardButton(text="/ban"),
             types.KeyboardButton(text="/unban"),
             types.KeyboardButton(text="/mute"),
-            types.KeyboardButton(text="/parse")
+            types.KeyboardButton(text="/parse"),
+            types.KeyboardButton(text="/toxic")
         ],
     ]
     keyboard = types.ReplyKeyboardMarkup(
@@ -103,15 +104,23 @@ async def create_table():
                 await cursor.execute('''
                     CREATE TABLE IF NOT EXISTS members (
                         chat_id INTEGER,
-                        member_id INTEGER
+                        member_id INTEGER PRIMARY KEY,
+                        toxic_words TEXT
                     )
                 ''')
                 await conn.commit()
     except Exception as e:
         print(f"Error creating table: {e}")
 
+@router.message(Command('parse'))
+async def parse_members(msg: Message):
+    chat_id = msg.chat.id
+    chat_members = await get_chat_members(chat_id)
+    await msg.answer(f'Участники чата: {chat_members}')
+    await add_members_to_database(chat_id, chat_members)
+
 async def add_members_to_database(chat_id: int, member_ids: list):
-    await create_table()  # Проверка на существование таблицф
+    await create_table()  # Проверка на существование таблицы
 
     try:
         async with aiosqlite.connect('chat_members.db') as conn:
@@ -127,14 +136,34 @@ async def add_members_to_database(chat_id: int, member_ids: list):
     except Exception as e:
         print(f"Error adding members to database: {e}")
 
-@router.message(Command('parse'))
-async def parse_members(msg: types.Message):
+
+async def add_toxic_words(chat_id, member_id, toxic_words):
+    await create_table()  # Проверка на существование таблицы
+
+
+    try:
+        async with aiosqlite.connect('chat_members.db') as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute('''
+                    UPDATE members
+                    SET toxic_words = ?
+                    WHERE member_id = ? AND chat_id = ?
+                ''', (toxic_words, member_id, chat_id))
+                await conn.commit()
+    except Exception as e:
+        print(f"Error adding toxic words: {e}")
+
+@router.message(Command('toxic'))
+async def add_toxic_word(msg: Message):
     if msg.reply_to_message:
         chat_id = msg.chat.id
-        chat_members = await get_chat_members(chat_id)
-        await msg.answer(f'Участники чата: {chat_members}')
-
-        await add_members_to_database(chat_id, chat_members)
+        member_id = msg.reply_to_message.from_user.id
+        username = msg.reply_to_message.from_user.first_name
+        toxic_word = msg.reply_to_message.from_user #мб не так
+        await add_toxic_words(chat_id, member_id, toxic_word)
+        await msg.reply(f"Слово '{toxic_word}' добавлено к пользователю {username} в базу данных.")
+    else:
+        await msg.answer('Если ты хочешь добавить слово к токсику, ответь на его сообщение')
 
 @router.message(Command('ban'))
 async def ban_toxic(msg: Message):
