@@ -10,7 +10,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 import config
 from aiogram import types, F, Router, Bot
 from aiogram.types import Message
-from aiogram.methods import GetChatAdministrators
+from aiogram.methods import get_chat_member
 from aiogram.filters.chat_member_updated import \
     ChatMemberUpdatedFilter, KICKED, LEFT, \
     RESTRICTED, MEMBER, ADMINISTRATOR, CREATOR
@@ -19,8 +19,6 @@ from aiogram.filters.command import Command
 import asyncio
 import aiosqlite
 
-
-admins = {}
 router = Router()
 
 @router.message(F.text.lower() == 'привет')
@@ -204,25 +202,35 @@ async def show_member_points(msg: Message):
 
 @router.message(Command('ban'))
 async def ban_toxic(msg: Message):
+    bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
     if msg.reply_to_message:
         user_id = msg.reply_to_message.from_user.id
         username = msg.reply_to_message.from_user.first_name
-        try:
-            await msg.chat.ban(user_id=user_id)
-            await msg.answer(f'Токсик {username} забанен! Давайте вместе бороться с токсичностью!')
-        except aiogram.exceptions.TelegramBadRequest as e:
-            logging.error(f'Ошибка при выполнении запроса: {e}')
-            await msg.answer('Я не хочу банить моего любимого админа!!')
+        user_status = await bot.get_chat_member(chat_id=msg.chat.id, user_id=user_id)
+        if user_status.status.CREATOR:
+            try:
+                await msg.chat.ban(user_id=user_id)
+                await msg.answer(f'Токсик {username} забанен! Давайте вместе бороться с токсичностью!')
+            except aiogram.exceptions.TelegramBadRequest as e:
+                logging.error(f'Ошибка при выполнении запроса: {e}')
+                await msg.answer('Я не хочу банить моего любимого админа!!')
+        else:
+            await msg.answer('Котик, у тебя недостаточно прав для совершения данного действия')
     else:
         await msg.answer('Если ты хочешь забанить токсика, ответь на его сообщение')
 
 @router.message(Command('unban'))
 async def unban_toxic(msg: Message):
+    bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
     if msg.reply_to_message:
         user_id = msg.reply_to_message.from_user.id
         username = msg.reply_to_message.from_user.first_name
-        await msg.chat.unban(user_id=user_id)
-        await msg.answer(f'Токсик {username} разбанен!!')
+        user_status = await bot.get_chat_member(chat_id=msg.chat.id, user_id=user_id)
+        if user_status.status.CREATOR:
+            await msg.chat.unban(user_id=user_id)
+            await msg.answer(f'Токсик {username} разбанен!!')
+        else:
+            await msg.answer('Котик, у тебя недостаточно прав для совершения данного действия')
     else:
         await msg.answer('Если ты хочешь разбанить токсика, ответь на его сообщение')
 
@@ -231,19 +239,24 @@ async def mutie(msg: Message):
     if msg.reply_to_message:
         bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
         user_id = msg.reply_to_message.from_user.id
+        user_status = await bot.get_chat_member(chat_id=msg.chat.id, user_id=user_id)
         username = msg.reply_to_message.from_user.first_name
         chat_id = msg.chat.id
         permissions = types.ChatPermissions(can_send_messages=False, can_send_media_messages=False, can_send_polls=False,
                                       can_send_other_messages=False)
-        try:
-            await bot.restrict_chat_member(chat_id=chat_id, user_id=user_id, permissions=permissions,
-                                           use_independent_chat_permissions=False,
-                                           until_date=datetime.timedelta(minutes=3))
-            await msg.answer(f'Токсик {username} замьючен!')
 
-        except aiogram.exceptions.TelegramBadRequest as e:
-            logging.error(f'Ошибка при выполнении запроса: {e}')
-            await msg.answer('Я не хочу мьютить моего любимого админа!!')
+        if user_status.status.ADMINISTRATOR or user_status.status.CREATOR:
+            try:
+                await bot.restrict_chat_member(chat_id=chat_id, user_id=user_id, permissions=permissions,
+                                               use_independent_chat_permissions=False,
+                                               until_date=datetime.timedelta(minutes=3))
+                await msg.answer(f'Токсик {username} замьючен!')
+
+            except aiogram.exceptions.TelegramBadRequest as e:
+                logging.error(f'Ошибка при выполнении запроса: {e}')
+                await msg.answer('Я не хочу мьютить моего любимого админа!!')
+        else:
+            await msg.answer('Котик, у тебя недостаточно прав для совершения данного действия')
     else:
         await msg.answer('Если ты хочешь замьютить токсика, ответь на его сообщение')
 
