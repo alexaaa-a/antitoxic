@@ -31,7 +31,8 @@ async def start_handler(msg: Message):
             types.KeyboardButton(text="/unban"),
             types.KeyboardButton(text="/mute"),
             types.KeyboardButton(text="/parse"),
-            types.KeyboardButton(text="/toxic")
+            types.KeyboardButton(text="/toxic"),
+            types.KeyboardButton(text="/points")
         ],
     ]
     keyboard = types.ReplyKeyboardMarkup(
@@ -175,6 +176,27 @@ async def add_toxic_word(msg: Message):
         await msg.reply(f"Слово '{toxic_word}' добавлено к пользователю {username} в базу данных и +1 балл участнику.")
     else:
         await msg.answer('Если ты хочешь добавить слово к токсику, ответь на его сообщение')
+
+
+@router.message(Command('points'))
+async def show_member_points(msg: Message):
+    try:
+        async with aiosqlite.connect('chat_members.db') as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute('SELECT username, points FROM members')
+                rows = await cursor.fetchall()
+
+                response = ''
+                for row in rows:
+                    username, points = row
+                    response += f'Участник с ID {username} имеет {points} балл(ов)\n'
+
+                await msg.answer(response, parse_mode=ParseMode.HTML)
+
+    except aiosqlite.Error as e:
+        logging.error(f'Ошибка при выполнении запроса: {e}')
+        await msg.answer('Произошла ошибка при выполнении запроса.')
+
 
 @router.message(Command('ban'))
 async def ban_toxic(msg: Message):
