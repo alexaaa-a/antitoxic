@@ -6,11 +6,11 @@ async def add_toxic_words(chat_id, member_id, toxic_words):
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
                 # Создание таблицы, если ее еще нет
-                await create_table(chat_id)
+                await create_table()
 
                 # Выполнение запроса на добавление токсичного слова
                 await cursor.execute(f'''
-                    INSERT INTO members_{chat_id} (chat_id, member_id, toxic_words)
+                    INSERT INTO members(chat_id, member_id, toxic_words)
                     VALUES (?, ?, ?)
                     ON CONFLICT(chat_id, member_id) DO UPDATE SET toxic_words = COALESCE(toxic_words || ?, toxic_words)
                 ''', (chat_id, member_id, toxic_words, ',' + toxic_words))
@@ -19,12 +19,12 @@ async def add_toxic_words(chat_id, member_id, toxic_words):
         print(f"Error adding toxic words: {e}")
 
 # Функция создания таблицы
-async def create_table(chat_id):
+async def create_table():
     try:
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(f'''
-                    CREATE TABLE IF NOT EXISTS members_{chat_id} (
+                    CREATE TABLE IF NOT EXISTS members (
                         chat_id INTEGER,
                         member_id INTEGER,
                         toxic_words TEXT,
