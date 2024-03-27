@@ -1,7 +1,7 @@
 import logging
 
 import aiogram.exceptions
-
+import joblib
 from db import get_chat_members
 import datetime
 from aiogram import Dispatcher
@@ -144,7 +144,7 @@ async def parse_members(msg: Message):
     await reset_and_recreate_table()
     chat_id = msg.chat.id
     chat_members = await get_chat_members(chat_id)
-    await msg.answer(f'Участники чата: {chat_members}')
+    await msg.answer(f'Участники чата успешно добавлены!')
     await add_members_to_database(chat_id, chat_members, points=0)
 
 async def add_members_to_database(chat_id: int, member_ids: list, points: int):
@@ -264,6 +264,29 @@ async def toxicity_stats_command(msg: Message):
 
     await msg.answer(response, parse_mode=ParseMode.HTML)
 
+@router.message(Command('chat_stats'))
+async def chat_stats(msg: Message):
+    bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
+    try:
+        async with aiosqlite.connect('chat_members.db') as conn:
+            async with conn.cursor() as cursor:
+                # Выбираем список участников и количество сообщений для каждого из них
+                await cursor.execute('SELECT user_id, COUNT(*) FROM messages GROUP BY user_id')
+                rows = await cursor.fetchall()
+
+                # Формируем сообщение со статистикой
+                stats_message = "Статистика участников:\n"
+                for row in rows:
+                    user_id, message_count = row
+                    user_info = await bot.get_chat_member(msg.chat.id, user_id)
+                    username = user_info.user.username if user_info.user.username else user_info.user.first_name
+                    stats_message += f"@{username}: {message_count} сообщений\n"
+
+                await msg.answer(stats_message)
+    except aiosqlite.Error as e:
+        logging.error(f'Ошибка при получении статистики чата: {e}')
+        await msg.answer('Произошла ошибка при получении статистики чата.')
+
 @router.message(Command('ban'))
 async def ban_toxic(msg: Message):
     bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
@@ -323,6 +346,14 @@ async def mutie(msg: Message):
             await msg.answer('Котик, у тебя недостаточно прав для совершения данного действия')
     else:
         await msg.answer('Если ты хочешь замьютить токсика, ответь на его сообщение')
+
+model = joblib.load('model.pkl')
+@router.message()
+async def predict(msg: Message):
+    text = msg.text
+    prediction = model.predict([text])
+    if prediction == -1:
+        await msg.answer(f"Сообщение токсичное")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
