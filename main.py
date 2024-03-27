@@ -167,14 +167,18 @@ async def add_members_to_database(chat_id: int, member_ids: list, points: int):
 
 async def add_toxic_words(chat_id, member_id, toxic_words):
     try:
-        conn = await aiosqlite.connect('chat_members.db')
-        cursor = await conn.cursor()
-        await cursor.execute('''
-            INSERT INTO members (chat_id, member_id, toxic_words)
-            VALUES (?, ?, ?)
-            ON CONFLICT(chat_id, member_id) DO UPDATE SET toxic_words = COALESCE(toxic_words || ?, toxic_words)
-        ''', (chat_id, member_id, toxic_words, ',' + toxic_words))
-        await conn.commit()
+        async with aiosqlite.connect('chat_members.db') as conn:
+            async with conn.cursor() as cursor:
+                # Создание таблицы, если ее еще нет
+                await create_table()
+
+                # Выполнение запроса на добавление токсичного слова
+                await cursor.execute(f'''
+                    INSERT INTO members(chat_id, member_id, toxic_words)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(chat_id, member_id) DO UPDATE SET toxic_words = COALESCE(toxic_words || ?, toxic_words)
+                ''', (chat_id, member_id, toxic_words, ',' + toxic_words))
+                await conn.commit()
     except Exception as e:
         print(f"Error adding toxic words: {e}")
 
