@@ -165,22 +165,41 @@ async def add_members_to_database(chat_id: int, member_ids: list, points: int):
         print(f"Error adding members to database: {e}")
 
 
-async def add_toxic_words(chat_id, member_id, toxic_words):
+async def add_toxic_words(chat_id, member_id, toxic_word):
     try:
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
-                # Создание таблицы, если ее еще нет
                 await create_table()
 
-                # Выполнение запроса на добавление токсичного слова
-                await cursor.execute(f'''
-                    INSERT INTO members(chat_id, member_id, toxic_words)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(chat_id, member_id) DO UPDATE SET toxic_words = COALESCE(toxic_words || ?, toxic_words)
-                ''', (chat_id, member_id, toxic_words, ',' + toxic_words))
+                # Проверяем, существует ли уже запись с указанным chat_id и member_id
+                await cursor.execute('''
+                        SELECT *
+                        FROM members
+                        WHERE chat_id = ? AND member_id = ?
+                    ''', (chat_id, member_id))
+                existing_record = await cursor.fetchone()
+
+                if existing_record:
+                    existing_toxic_words = existing_record[2]  # Получаем текущие токсичные слова
+                    if existing_toxic_words:
+                        new_toxic_words = f'{existing_toxic_words}, {toxic_word}'
+                    else:
+                        new_toxic_words = toxic_word
+                    await cursor.execute('''
+                            UPDATE members
+                            SET toxic_words = ?
+                            WHERE chat_id = ? AND member_id = ?
+                        ''', (new_toxic_words, chat_id, member_id))
+                else:
+                    # Если записи нет, просто добавляем новую запись
+                    await cursor.execute('''
+                            INSERT INTO members(chat_id, member_id, toxic_words)
+                            VALUES (?, ?, ?)
+                        ''', (chat_id, member_id, toxic_word))
+
                 await conn.commit()
     except Exception as e:
-        print(f"Error adding toxic words: {e}")
+        print(f"Error adding toxic word: {e}")
 
 @router.message(Command('toxic'))
 async def add_toxic_word(msg: Message):
