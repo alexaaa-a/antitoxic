@@ -214,27 +214,25 @@ async def add_toxic_words(chat_id, member_id, toxic_word):
         print(f"Error adding toxic word: {e}")
 
 
-@router.message(Command('toxic'))
+
 async def add_toxic_word(msg: Message):
-    if msg.reply_to_message:
-        chat_id = msg.chat.id
-        table_name = f'chat_{abs(chat_id)}'
-        member_id = msg.reply_to_message.from_user.id
-        username = msg.reply_to_message.from_user.first_name
-        toxic_word = msg.reply_to_message.text  # Получаем текст сообщения, к которому отвечают
-        await add_toxic_words(chat_id, member_id, toxic_word)
-        # Добавление +1 балла в столбец points для участника чата
-        async with aiosqlite.connect('chat_members.db') as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute(f'''
-                    UPDATE {table_name}
-                    SET points = points + 1
-                    WHERE member_id = ? AND chat_id = ?
-                ''', (member_id, chat_id))
-                await conn.commit()
-        await msg.answer(f"Слово '{toxic_word}' добавлено к пользователю {username} в базу данных и +1 балл участнику.")
-    else:
-        await msg.answer('Если ты хочешь добавить слово к токсику, ответь на его сообщение')
+    chat_id = msg.chat.id
+    table_name = f'chat_{abs(chat_id)}'
+    member_id = msg.from_user.id
+    username = msg.from_user.first_name
+    toxic_word = msg.text  # Получаем текст сообщения, к которому отвечают
+    await add_toxic_words(chat_id, member_id, toxic_word)
+    # Добавление +1 балла в столбец points для участника чата
+    async with aiosqlite.connect('chat_members.db') as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(f'''
+                UPDATE {table_name}
+                SET points = points + 1
+                WHERE member_id = ? AND chat_id = ?
+            ''', (member_id, chat_id))
+            await conn.commit()
+    await msg.answer(f"Слово '{toxic_word}' добавлено к пользователю {username} в базу данных и +1 балл участнику.")
+
 
 
 @router.message(Command('points'))
@@ -397,10 +395,11 @@ async def mutie(msg: Message):
 model = joblib.load('model.pkl')
 @router.message()
 async def predict(msg: Message):
+    model = joblib.load('model.pkl')
     text = msg.text
     prediction = model.predict([text])
     if prediction == -1:
-        await msg.answer(f"Сообщение токсичное")
+        await add_toxic_word(msg)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
