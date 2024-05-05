@@ -1,5 +1,5 @@
 import logging
-
+from aiogram.client.bot import DefaultBotProperties
 import aiogram.exceptions
 import joblib
 from db import get_chat_members
@@ -8,9 +8,9 @@ from aiogram import Dispatcher
 from aiogram.enums.parse_mode import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 import config
+from aiogram.methods import get_chat_member
 from aiogram import types, F, Router, Bot
 from aiogram.types import Message
-from aiogram.methods import get_chat_member
 from aiogram.filters.chat_member_updated import \
     ChatMemberUpdatedFilter, KICKED, LEFT, \
     RESTRICTED, MEMBER, ADMINISTRATOR, CREATOR
@@ -26,34 +26,43 @@ router = Router()
 async def welcome(message: Message):
     await message.answer('Напиши /start, и мы начнем!')
 
+bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
 @router.message(Command("start"))
 async def start_handler(msg: Message):
-    kb = [
-        [
-            types.KeyboardButton(text="/ban"),
-            types.KeyboardButton(text="/unban"),
-            types.KeyboardButton(text="/mute"),
-            types.KeyboardButton(text="/toxic"),
-            types.KeyboardButton(text="/points")
-        ],
-    ]
-    keyboard = types.ReplyKeyboardMarkup(
-        keyboard=kb,
-        resize_keyboard=True,
-    )
-    await msg.answer('Мяяу!! Я - бот для определения токсиков и душнил в твоих чатах :) Выбери нужную кнопочку и жмякни по ней!')
-    await msg.answer('Кнопочки для вас, мои котики!', reply_markup=keyboard)
+    user_id = msg.from_user.id
+    username = msg.from_user.first_name
+    user_status = await bot.get_chat_member(chat_id=msg.chat.id, user_id=user_id)
+    if user_status.status == 'creator':
+        try:
+            kb = [
+                [
+                    types.KeyboardButton(text="/ban"),
+                    types.KeyboardButton(text="/unban"),
+                    types.KeyboardButton(text="/mute"),
+                    types.KeyboardButton(text="/toxic"),
+                    types.KeyboardButton(text="/points")
+                ],
+            ]
+            keyboard = types.ReplyKeyboardMarkup(
+                keyboard=kb,
+                resize_keyboard=True,
+            )
+            await msg.answer('Мяяу!! Я - бот для определения токсиков и душнил в твоих чатах :) Выбери нужную кнопочку и жмякни по ней!')
+            await msg.answer('Кнопочки для вас, мои котики!', reply_markup=keyboard)
+            chat_id = msg.chat.id
+            await reset_and_recreate_table(chat_id)
+            chat_members = await get_chat_members(chat_id)
+            await msg.answer(f'Участники чата успешно добавлены!')
+            await add_members_to_database(chat_id, chat_members, points=0)
+        except aiogram.exceptions.TelegramBadRequest as e:
+            logging.error(f'Ошибка при выполнении запроса: {e}')
+    else:
+        await msg.answer('Котик, у тебя недостаточно прав для запуска бота!')
 
-    chat_id = msg.chat.id
-    await reset_and_recreate_table(chat_id)
-    chat_members = await get_chat_members(chat_id)
-    await msg.answer(f'Участники чата успешно добавлены!')
-    await add_members_to_database(chat_id, chat_members, points=0)
 
 
 async def main():
-    bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
@@ -114,6 +123,7 @@ async def reset_and_recreate_table(chat_id):
     await create_table(chat_id)
 
 
+@router.message(Command('toxic'))
 async def add_word_to_database(word: str):
     await create_table_words()
 
@@ -308,7 +318,6 @@ async def toxicity_stats_command(msg: Message):
 
 @router.message(Command('chat_stats'))
 async def chat_stats(msg: Message):
-    bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
     try:
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
@@ -332,14 +341,13 @@ async def chat_stats(msg: Message):
 
 @router.message(Command('ban'))
 async def ban_toxic(msg: Message):
-    bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
     if msg.reply_to_message:
-        user_id = msg.reply_to_message.from_user.id
+        user_id = msg.from_user.id
         username = msg.reply_to_message.from_user.first_name
         user_status = await bot.get_chat_member(chat_id=msg.chat.id, user_id=user_id)
-        if user_status.status.CREATOR:
+        if user_status.status == 'creator':
             try:
-                await msg.chat.ban(user_id=user_id)
+                await msg.chat.ban(user_id=msg.reply_to_message.from_user.id)
                 await msg.answer(f'Токсик {username} забанен! Давайте вместе бороться с токсичностью!')
             except aiogram.exceptions.TelegramBadRequest as e:
                 logging.error(f'Ошибка при выполнении запроса: {e}')
@@ -352,34 +360,57 @@ async def ban_toxic(msg: Message):
 
 @router.message(Command('unban'))
 async def unban_toxic(msg: Message):
-    bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
     if msg.reply_to_message:
-        user_id = msg.reply_to_message.from_user.id
+        user_id = msg.from_user.id
         username = msg.reply_to_message.from_user.first_name
         user_status = await bot.get_chat_member(chat_id=msg.chat.id, user_id=user_id)
-        if user_status.status.CREATOR:
-            await msg.chat.unban(user_id=user_id)
+        if user_status.status == 'creator':
+            await msg.chat.unban(user_id=msg.reply_to_message.from_user.id)
             await msg.answer(f'Токсик {username} разбанен!!')
         else:
             await msg.answer('Котик, у тебя недостаточно прав для совершения данного действия')
     else:
         await msg.answer('Если ты хочешь разбанить токсика, ответь на его сообщение')
 
+@router.message(Command('toxic_words'))
+async def get_toxic_words(msg: Message):
+    try:
+        chat_id = msg.chat.id
+        table_name = f'chat_{abs(chat_id)}'
+        member_id = msg.reply_to_message.from_user.id
+        username = msg.reply_to_message.from_user.first_name
+        async with aiosqlite.connect('chat_members.db') as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(f'''
+                    SELECT toxic_words 
+                    FROM {table_name}
+                    WHERE member_id = ?
+                ''', (member_id,))
+                toxic_words = await cursor.fetchone()
+
+                if toxic_words is not None:
+                    await msg.answer(f"Токсичные слова {username}: {toxic_words[0]}")
+                else:
+                    await msg.answer(f"Пока что у {username} нет токсичных слов! Молодец!")
+    except aiosqlite.Error as e:
+        logging.error(f'Ошибка при получении токсичных слов: {e}')
+        await msg.answer('Произошла ошибка при получении токсичных слов.')
+
+
 
 @router.message(Command('mute'))
 async def mutie(msg: Message):
     if msg.reply_to_message:
-        bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
-        user_id = msg.reply_to_message.from_user.id
+        user_id = msg.from_user.id
         user_status = await bot.get_chat_member(chat_id=msg.chat.id, user_id=user_id)
         username = msg.reply_to_message.from_user.first_name
         chat_id = msg.chat.id
         permissions = types.ChatPermissions(can_send_messages=False, can_send_media_messages=False, can_send_polls=False,
                                       can_send_other_messages=False)
 
-        if user_status.status.ADMINISTRATOR or user_status.status.CREATOR:
+        if user_status.status == 'administrator' or user_status.status == 'creator':
             try:
-                await bot.restrict_chat_member(chat_id=chat_id, user_id=user_id, permissions=permissions,
+                await bot.restrict_chat_member(chat_id=chat_id, user_id=msg.reply_to_message.from_user.id, permissions=permissions,
                                                use_independent_chat_permissions=False,
                                                until_date=datetime.timedelta(minutes=3))
                 await msg.answer(f'Токсик {username} замьючен!')
@@ -395,52 +426,10 @@ async def mutie(msg: Message):
 model = joblib.load('model.pkl')
 @router.message()
 async def predict(msg: Message):
-    model = joblib.load('model.pkl')
     text = msg.text
     prediction = model.predict([text])
     if prediction == -1:
         await add_toxic_word(msg)
-
-
-async def additional_training(conn):
-    new_toxic_data = []
-    toxic = ["-1"] * 100
-    async with conn.execute('SELECT message FROM toxic_message') as cursor:
-        async for string in cursor:
-            new_toxic_data.append(string[0])
-    new_toxic_data.append("Привет, как дела?", "Доброе утро, как настроение?", "Пока, до встречи!", "Молодец, ты справишься!", "Здравствуй, как твои дела?", "До свидания, будь здоров!", "Отлично, продолжай в том же духе!", "Приветствую, как прошел день?", "Спокойной ночи, приятных снов!", "Удачи, ты сможешь все!", "Вечер добрый, как прошел день?", "До скорой встречи!", "Поздравляю!", "Добрый день, какие у тебя планы?", "Спасибо, что ты есть рядом!", "Доброй ночи!", "Ты молодец, не сомневайся!", "Здравствуй, как прошла неделя?")
-    toxic += ["+1"] * len(new_toxic_data)
-    model.fit(new_toxic_data, toxic)
-
-    await conn.execute('UPDATE toxic_message SET message = NULL')
-    await conn.commit()
-
-    joblib.dump(model, 'model.pkl')
-
-
-@router.message(Command('toxic'))
-async def add_word_to_database(msg: Message):
-    add_toxic_word(msg)
-    await create_table_words()
-
-    text = msg.reply_to_message.text
-    try:
-        async with aiosqlite.connect('words.db') as conn:
-            async with conn.cursor() as cursor:
-                if check_text_in_table(text, cursor):
-                    await cursor.execute('''
-                        INSERT INTO toxic_message (message)
-                        VALUES (?)
-                    ''', (text,))
-                    await conn.commit()
-
-                    await cursor.execute('SELECT COUNT(message) FROM toxic_message')
-                    count_message = await cursor.fetchone()
-                    if count_message == 100:
-                        await additional_training(conn)
-    except Exception as e:
-        print(f"Error adding word to database: {e}")
-
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
