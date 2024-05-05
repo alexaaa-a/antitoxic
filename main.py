@@ -26,7 +26,9 @@ router = Router()
 async def welcome(message: Message):
     await message.answer('Напиши /start, и мы начнем!')
 
+
 bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+
 
 @router.message(Command("start"))
 async def start_handler(msg: Message):
@@ -48,7 +50,8 @@ async def start_handler(msg: Message):
                 keyboard=kb,
                 resize_keyboard=True,
             )
-            await msg.answer('Мяяу!! Я - бот для определения токсиков и душнил в твоих чатах :) Выбери нужную кнопочку и жмякни по ней!')
+            await msg.answer(
+                'Мяяу!! Я - бот для определения токсиков и душнил в твоих чатах :) Выбери нужную кнопочку и жмякни по ней!')
             await msg.answer('Кнопочки для вас, мои котики!', reply_markup=keyboard)
             chat_id = msg.chat.id
             await reset_and_recreate_table(chat_id)
@@ -59,7 +62,6 @@ async def start_handler(msg: Message):
             logging.error(f'Ошибка при выполнении запроса: {e}')
     else:
         await msg.answer('Котик, у тебя недостаточно прав для запуска бота!')
-
 
 
 async def main():
@@ -122,13 +124,20 @@ async def reset_and_recreate_table(chat_id):
     await drop_table(chat_id)
     await create_table(chat_id)
 
+
 async def additional_training(conn):
     new_toxic_data = []
     toxic = ["-1"] * 100
     async with conn.execute('SELECT message FROM toxic_message') as cursor:
         async for string in cursor:
             new_toxic_data.append(string[0])
-    new_toxic_data.append("Привет, как дела?", "Доброе утро, как настроение?", "Пока, до встречи!", "Молодец, ты справишься!", "Здравствуй, как твои дела?", "До свидания, будь здоров!", "Отлично, продолжай в том же духе!", "Приветствую, как прошел день?", "Спокойной ночи, приятных снов!", "Удачи, ты сможешь все!", "Вечер добрый, как прошел день?", "До скорой встречи!", "Поздравляю!", "Добрый день, какие у тебя планы?", "Спасибо, что ты есть рядом!", "Доброй ночи!", "Ты молодец, не сомневайся!", "Здравствуй, как прошла неделя?")
+    new_toxic_data.append("Привет, как дела?", "Доброе утро, как настроение?", "Пока, до встречи!",
+                          "Молодец, ты справишься!", "Здравствуй, как твои дела?", "До свидания, будь здоров!",
+                          "Отлично, продолжай в том же духе!", "Приветствую, как прошел день?",
+                          "Спокойной ночи, приятных снов!", "Удачи, ты сможешь все!", "Вечер добрый, как прошел день?",
+                          "До скорой встречи!", "Поздравляю!", "Добрый день, какие у тебя планы?",
+                          "Спасибо, что ты есть рядом!", "Доброй ночи!", "Ты молодец, не сомневайся!",
+                          "Здравствуй, как прошла неделя?")
     toxic += ["+1"] * len(new_toxic_data)
     model.fit(new_toxic_data, toxic)
 
@@ -149,20 +158,22 @@ async def add_word_to_database(word: str):
                     VALUES (?)
                 ''', (word,))
                 await conn.commit()
-                await cursor.execute('SELECT COUNT(message) FROM toxic_message')
-                    count_message = await cursor.fetchone()
-                    if count_message == 100:
-                        await additional_training(conn)
+                await cursor.execute('SELECT COUNT(word) FROM words')
+                count_message = await cursor.fetchone()
+                if count_message == 100:
+                    await additional_training(conn)
+
     except Exception as e:
         print(f"Error adding word to database: {e}")
 
 
 @router.message(Command('toxic'))
 async def add_new_word(msg: Message):
-    add_toxic_word(msg.reply_to_message)
+    await add_toxic_word(msg.reply_to_message)
     word = msg.reply_to_message.text
     await add_word_to_database(word)
-        
+
+
 async def create_table(chat_id: int):
     try:
         table_name = f'chat_{abs(chat_id)}'
@@ -238,7 +249,6 @@ async def add_toxic_words(chat_id, member_id, toxic_word):
         print(f"Error adding toxic word: {e}")
 
 
-
 async def add_toxic_word(msg: Message):
     chat_id = msg.chat.id
     table_name = f'chat_{abs(chat_id)}'
@@ -256,7 +266,6 @@ async def add_toxic_word(msg: Message):
             ''', (member_id, chat_id))
             await conn.commit()
     await msg.answer(f"Слово '{toxic_word}' добавлено к пользователю {username} в базу данных и +1 балл участнику.")
-
 
 
 @router.message(Command('points'))
@@ -386,6 +395,7 @@ async def unban_toxic(msg: Message):
     else:
         await msg.answer('Если ты хочешь разбанить токсика, ответь на его сообщение')
 
+
 @router.message(Command('toxic_words'))
 async def get_toxic_words(msg: Message):
     try:
@@ -411,7 +421,6 @@ async def get_toxic_words(msg: Message):
         await msg.answer('Произошла ошибка при получении токсичных слов.')
 
 
-
 @router.message(Command('mute'))
 async def mutie(msg: Message):
     if msg.reply_to_message:
@@ -419,12 +428,14 @@ async def mutie(msg: Message):
         user_status = await bot.get_chat_member(chat_id=msg.chat.id, user_id=user_id)
         username = msg.reply_to_message.from_user.first_name
         chat_id = msg.chat.id
-        permissions = types.ChatPermissions(can_send_messages=False, can_send_media_messages=False, can_send_polls=False,
-                                      can_send_other_messages=False)
+        permissions = types.ChatPermissions(can_send_messages=False, can_send_media_messages=False,
+                                            can_send_polls=False,
+                                            can_send_other_messages=False)
 
         if user_status.status == 'administrator' or user_status.status == 'creator':
             try:
-                await bot.restrict_chat_member(chat_id=chat_id, user_id=msg.reply_to_message.from_user.id, permissions=permissions,
+                await bot.restrict_chat_member(chat_id=chat_id, user_id=msg.reply_to_message.from_user.id,
+                                               permissions=permissions,
                                                use_independent_chat_permissions=False,
                                                until_date=datetime.timedelta(minutes=3))
                 await msg.answer(f'Токсик {username} замьючен!')
@@ -437,13 +448,17 @@ async def mutie(msg: Message):
     else:
         await msg.answer('Если ты хочешь замьютить токсика, ответь на его сообщение')
 
+
 model = joblib.load('model.pkl')
+
+
 @router.message()
 async def predict(msg: Message):
     text = msg.text
     prediction = model.predict([text])
     if prediction == -1:
         await add_toxic_word(msg)
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
