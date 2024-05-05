@@ -144,7 +144,7 @@ async def create_table(chat_id: int):
         table_name = f'chat_{abs(chat_id)}'
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute('''
+                await cursor.execute(f'''
                     CREATE TABLE IF NOT EXISTS {table_name} (
                         chat_id INTEGER,
                         member_id INTEGER,
