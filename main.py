@@ -122,8 +122,22 @@ async def reset_and_recreate_table(chat_id):
     await drop_table(chat_id)
     await create_table(chat_id)
 
+async def additional_training(conn):
+    new_toxic_data = []
+    toxic = ["-1"] * 100
+    async with conn.execute('SELECT message FROM toxic_message') as cursor:
+        async for string in cursor:
+            new_toxic_data.append(string[0])
+    new_toxic_data.append("Привет, как дела?", "Доброе утро, как настроение?", "Пока, до встречи!", "Молодец, ты справишься!", "Здравствуй, как твои дела?", "До свидания, будь здоров!", "Отлично, продолжай в том же духе!", "Приветствую, как прошел день?", "Спокойной ночи, приятных снов!", "Удачи, ты сможешь все!", "Вечер добрый, как прошел день?", "До скорой встречи!", "Поздравляю!", "Добрый день, какие у тебя планы?", "Спасибо, что ты есть рядом!", "Доброй ночи!", "Ты молодец, не сомневайся!", "Здравствуй, как прошла неделя?")
+    toxic += ["+1"] * len(new_toxic_data)
+    model.fit(new_toxic_data, toxic)
 
-@router.message(Command('toxic'))
+    await conn.execute('UPDATE toxic_message SET message = NULL')
+    await conn.commit()
+
+    joblib.dump(model, 'model.pkl')
+
+
 async def add_word_to_database(word: str):
     await create_table_words()
 
@@ -135,20 +149,20 @@ async def add_word_to_database(word: str):
                     VALUES (?)
                 ''', (word,))
                 await conn.commit()
+                await cursor.execute('SELECT COUNT(message) FROM toxic_message')
+                    count_message = await cursor.fetchone()
+                    if count_message == 100:
+                        await additional_training(conn)
     except Exception as e:
         print(f"Error adding word to database: {e}")
 
 
-@router.message(Command('new'))
-async def add_new_word(msg: Message, command: Command):
-    word = command.args
-    if word:
-        await add_word_to_database(word)
-        await msg.answer(f'Слово "{word}" добавленно в базу.')
-    else:
-        await msg.answer('Пожалуйста, напиши слово, которое ты хочешь добавить в базу, после команды')
-
-
+@router.message(Command('toxic'))
+async def add_new_word(msg: Message):
+    add_toxic_word(msg.reply_to_message)
+    word = msg.reply_to_message.text
+    await add_word_to_database(word)
+        
 async def create_table(chat_id: int):
     try:
         table_name = f'chat_{abs(chat_id)}'
