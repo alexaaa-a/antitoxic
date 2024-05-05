@@ -21,9 +21,11 @@ import aiosqlite
 
 router = Router()
 
+
 @router.message(F.text.lower() == 'привет')
 async def welcome(message: Message):
     await message.answer('Напиши /start, и мы начнем!')
+
 
 @router.message(Command("start"))
 async def start_handler(msg: Message):
@@ -43,8 +45,8 @@ async def start_handler(msg: Message):
     await msg.answer('Мяяу!! Я - бот для определения токсиков и душнил в твоих чатах :) Выбери нужную кнопочку и жмякни по ней!')
     await msg.answer('Кнопочки для вас, мои котики!', reply_markup=keyboard)
 
-    await reset_and_recreate_table()
     chat_id = msg.chat.id
+    await reset_and_recreate_table(chat_id)
     chat_members = await get_chat_members(chat_id)
     await msg.answer(f'Участники чата успешно добавлены!')
     await add_members_to_database(chat_id, chat_members, points=0)
@@ -55,6 +57,7 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+
 
 @router.chat_member(
     ChatMemberUpdatedFilter(
@@ -67,23 +70,28 @@ async def main():
 async def admin_promoted(event: ChatMemberUpdated, admins: set[int]):
     admins.add(event.new_chat_member.user.id)
 
-async def reset_points():
+
+async def reset_points(chat_id):
     try:
+        table_name = f'chat_{abs(chat_id)}'
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute('UPDATE members SET points = 0')
+                await cursor.execute(f'UPDATE {table_name} SET points = 0')
                 await conn.commit()
     except Exception as e:
         print(f"Error resetting points: {e}")
 
-async def drop_table():
+
+async def drop_table(chat_id):
     try:
+        table_name = f'chat_{abs(chat_id)}'
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute('DROP TABLE IF EXISTS members')
+                await cursor.execute(f'DROP TABLE IF EXISTS {table_name}')
                 await conn.commit()
     except Exception as e:
         print(f"Error dropping table: {e}")
+
 
 async def create_table_words():
     try:
@@ -99,10 +107,12 @@ async def create_table_words():
     except Exception as e:
         print(f"Error creating table: {e}")
 
-async def reset_and_recreate_table():
-    await reset_points()
-    await drop_table()
-    await create_table()
+
+async def reset_and_recreate_table(chat_id):
+    await reset_points(chat_id)
+    await drop_table(chat_id)
+    await create_table(chat_id)
+
 
 async def add_word_to_database(word: str):
     await create_table_words()
@@ -118,6 +128,7 @@ async def add_word_to_database(word: str):
     except Exception as e:
         print(f"Error adding word to database: {e}")
 
+
 @router.message(Command('new'))
 async def add_new_word(msg: Message, command: Command):
     word = command.args
@@ -127,12 +138,14 @@ async def add_new_word(msg: Message, command: Command):
     else:
         await msg.answer('Пожалуйста, напиши слово, которое ты хочешь добавить в базу, после команды')
 
-async def create_table():
+
+async def create_table(chat_id: int):
     try:
+        table_name = f'chat_{abs(chat_id)}'
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS members (
+                    CREATE TABLE IF NOT EXISTS {table_name} (
                         chat_id INTEGER,
                         member_id INTEGER,
                         toxic_words TEXT,
@@ -144,15 +157,16 @@ async def create_table():
     except Exception as e:
         print(f"Error creating table: {e}")
 
+
 async def add_members_to_database(chat_id: int, member_ids: list, points: int):
     try:
-        await create_table()  # Проверка на существование таблицы
-
+        await create_table(chat_id)  # Проверка на существование таблицы
+        table_name = f'chat_{abs(chat_id)}'
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
                 for member_id in member_ids:
-                    await cursor.execute('''
-                        INSERT INTO members (chat_id, member_id, points)
+                    await cursor.execute(f'''
+                        INSERT INTO {table_name} (chat_id, member_id, points)
                         VALUES (?, ?, ?)
                     ''', (chat_id, member_id, points))
 
@@ -164,14 +178,15 @@ async def add_members_to_database(chat_id: int, member_ids: list, points: int):
 
 async def add_toxic_words(chat_id, member_id, toxic_word):
     try:
+        table_name = f'chat_{abs(chat_id)}'
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
-                await create_table()
+                await create_table(chat_id)
 
                 # Проверяем, существует ли уже запись с указанным chat_id и member_id
-                await cursor.execute('''
+                await cursor.execute(f'''
                         SELECT *
-                        FROM members
+                        FROM {table_name}
                         WHERE chat_id = ? AND member_id = ?
                     ''', (chat_id, member_id))
                 existing_record = await cursor.fetchone()
@@ -182,15 +197,15 @@ async def add_toxic_words(chat_id, member_id, toxic_word):
                         new_toxic_words = f'{existing_toxic_words}, {toxic_word}'
                     else:
                         new_toxic_words = toxic_word
-                    await cursor.execute('''
-                            UPDATE members
+                    await cursor.execute(f'''
+                            UPDATE {table_name}
                             SET toxic_words = ?
                             WHERE chat_id = ? AND member_id = ?
                         ''', (new_toxic_words, chat_id, member_id))
                 else:
                     # Если записи нет, просто добавляем новую запись
-                    await cursor.execute('''
-                            INSERT INTO members(chat_id, member_id, toxic_words)
+                    await cursor.execute(f'''
+                            INSERT INTO {table_name}(chat_id, member_id, toxic_words)
                             VALUES (?, ?, ?)
                         ''', (chat_id, member_id, toxic_word))
 
@@ -198,10 +213,12 @@ async def add_toxic_words(chat_id, member_id, toxic_word):
     except Exception as e:
         print(f"Error adding toxic word: {e}")
 
+
 @router.message(Command('toxic'))
 async def add_toxic_word(msg: Message):
     if msg.reply_to_message:
         chat_id = msg.chat.id
+        table_name = f'chat_{abs(chat_id)}'
         member_id = msg.reply_to_message.from_user.id
         username = msg.reply_to_message.from_user.first_name
         toxic_word = msg.reply_to_message.text  # Получаем текст сообщения, к которому отвечают
@@ -209,8 +226,8 @@ async def add_toxic_word(msg: Message):
         # Добавление +1 балла в столбец points для участника чата
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute('''
-                    UPDATE members
+                await cursor.execute(f'''
+                    UPDATE {table_name}
                     SET points = points + 1
                     WHERE member_id = ? AND chat_id = ?
                 ''', (member_id, chat_id))
@@ -219,24 +236,25 @@ async def add_toxic_word(msg: Message):
     else:
         await msg.answer('Если ты хочешь добавить слово к токсику, ответь на его сообщение')
 
+
 @router.message(Command('points'))
 async def show_member_points(msg: Message):
     try:
-        # Получаем ID пользователя, на чье сообщение отвечаем
-        replied_user_id = msg.reply_to_message.from_user.id
-
+        chat_id = msg.chat.id
+        username = msg.reply_to_message.from_user.first_name
+        table_name = f'chat_{abs(chat_id)}'
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
                 # Извлекаем баллы только для указанного пользователя
-                await cursor.execute('SELECT points FROM members WHERE member_id = ?', (replied_user_id,))
+                await cursor.execute(f'SELECT points FROM {table_name} WHERE member_id = ?', (username,))
                 row = await cursor.fetchone()
 
                 # Проверяем, найдены ли баллы для пользователя
                 if row:
                     points = row[0]
-                    response = f'Участник с ID {replied_user_id} имеет {points} балл(ов)'
+                    response = f'{username} имеет {points} балл(ов)'
                 else:
-                    response = f'Участник с ID {replied_user_id} не имеет баллов'
+                    response = f'{username} не имеет баллов! Ты такой приятный!'
 
                 await msg.answer(response, parse_mode=ParseMode.HTML)
 
@@ -244,11 +262,13 @@ async def show_member_points(msg: Message):
         logging.error(f'Ошибка при выполнении запроса: {e}')
         await msg.answer('Произошла ошибка при выполнении запроса.')
 
-async def get_all_member_points():
+
+async def get_all_member_points(chat_id):
     try:
+        table_name = f'chat_{abs(chat_id)}'
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute('SELECT member_id, points FROM members')
+                await cursor.execute(f'SELECT member_id, points FROM {table_name}')
                 rows = await cursor.fetchall()
                 return rows
     except aiosqlite.Error as e:
@@ -264,21 +284,24 @@ async def calculate_toxicity(user_id, user_points, all_member_points):
 
 @router.message(Command('toxicity_stats'))
 async def toxicity_stats_command(msg: Message):
+    chat_id = msg.chat.id
     replied_user_id = msg.reply_to_message.from_user.id
-    all_member_points = await get_all_member_points()
+    username = msg.reply_to_message.from_user.first_name
+    all_member_points = await get_all_member_points(chat_id)
 
     if all_member_points:
         user_points = dict(all_member_points).get(replied_user_id)
 
         if user_points:
             toxicity_percent = await calculate_toxicity(replied_user_id, user_points, all_member_points)
-            response = f'Участник с ID {replied_user_id} имеет токсичность на уровне {toxicity_percent:.2f}% по сравнению с другими участниками группы.'
+            response = f'{username} имеет токсичность на уровне {toxicity_percent:.2f}% по сравнению с другими участниками группы.'
         else:
-            response = f'Участник с ID {replied_user_id} не найден в базе данных.'
+            response = f'{username} не найден в базе данных.'
     else:
         response = 'Произошла ошибка при выполнении запроса для получения данных участников.'
 
     await msg.answer(response, parse_mode=ParseMode.HTML)
+
 
 @router.message(Command('chat_stats'))
 async def chat_stats(msg: Message):
@@ -303,6 +326,7 @@ async def chat_stats(msg: Message):
         logging.error(f'Ошибка при получении статистики чата: {e}')
         await msg.answer('Произошла ошибка при получении статистики чата.')
 
+
 @router.message(Command('ban'))
 async def ban_toxic(msg: Message):
     bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
@@ -322,6 +346,7 @@ async def ban_toxic(msg: Message):
     else:
         await msg.answer('Если ты хочешь забанить токсика, ответь на его сообщение')
 
+
 @router.message(Command('unban'))
 async def unban_toxic(msg: Message):
     bot = Bot(token=config.BOT_TOKEN, parse_mode=ParseMode.HTML)
@@ -336,6 +361,7 @@ async def unban_toxic(msg: Message):
             await msg.answer('Котик, у тебя недостаточно прав для совершения данного действия')
     else:
         await msg.answer('Если ты хочешь разбанить токсика, ответь на его сообщение')
+
 
 @router.message(Command('mute'))
 async def mutie(msg: Message):
