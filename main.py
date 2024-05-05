@@ -43,11 +43,11 @@ async def start_handler(msg: Message):
     await msg.answer('Мяяу!! Я - бот для определения токсиков и душнил в твоих чатах :) Выбери нужную кнопочку и жмякни по ней!')
     await msg.answer('Кнопочки для вас, мои котики!', reply_markup=keyboard)
 
+    await reset_and_recreate_table()
     chat_id = msg.chat.id
     chat_members = await get_chat_members(chat_id)
-    await add_members_to_database(chat_id, chat_members, points=0)
     await msg.answer(f'Участники чата успешно добавлены!')
-    await reset_and_recreate_table(chat_id)
+    await add_members_to_database(chat_id, chat_members, points=0)
 
 
 async def main():
@@ -67,20 +67,20 @@ async def main():
 async def admin_promoted(event: ChatMemberUpdated, admins: set[int]):
     admins.add(event.new_chat_member.user.id)
 
-async def reset_points(chat_id):
+async def reset_points():
     try:
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute('UPDATE members_{id} SET points = 0'.format(id=chat_id))
+                await cursor.execute('UPDATE members SET points = 0')
                 await conn.commit()
     except Exception as e:
         print(f"Error resetting points: {e}")
 
-async def drop_table(chat_id):
+async def drop_table():
     try:
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
-                await cursor.execute('DROP TABLE IF EXISTS members_{id}'.format(id=chat_id))
+                await cursor.execute('DROP TABLE IF EXISTS members')
                 await conn.commit()
     except Exception as e:
         print(f"Error dropping table: {e}")
@@ -99,13 +99,11 @@ async def create_table_words():
     except Exception as e:
         print(f"Error creating table: {e}")
 
-async def reset_and_recreate_table(chat_id):
-    try:
-        await reset_points(chat_id)
-        await drop_table(chat_id)
-        await create_table(chat_id)
-    except Exception as e:
-        print(f"Error resetting and recreating table: {e}")
+async def reset_and_recreate_table():
+    await reset_points()
+    await drop_table()
+    await create_table()
+
 async def add_word_to_database(word: str):
     await create_table_words()
 
@@ -129,54 +127,34 @@ async def add_new_word(msg: Message, command: Command):
     else:
         await msg.answer('Пожалуйста, напиши слово, которое ты хочешь добавить в базу, после команды')
 
-async def create_table(msg: Message):
+async def create_table():
     try:
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
-                # Создаем таблицу для хранения информации о чатах
                 await cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS chat_info (
-                            id INTEGER PRIMARY KEY,
-                            chat_id INTEGER UNIQUE
-                        )
-                    ''')
+                    CREATE TABLE IF NOT EXISTS members (
+                        chat_id INTEGER,
+                        member_id INTEGER,
+                        toxic_words TEXT,
+                        points INTEGER,
+                        PRIMARY KEY (chat_id, member_id)
+                    )
+                ''')
                 await conn.commit()
-
-                # Проверяем, есть ли запись о текущем чате
-                chat_id = msg.chat.id
-                await cursor.execute('SELECT id FROM chat_info WHERE chat_id = ?', (chat_id,))
-                existing_chat = await cursor.fetchone()
-
-                if not existing_chat:
-                    # Если записи о чате нет, добавляем ее
-                    await cursor.execute('INSERT INTO chat_info (chat_id) VALUES (?)', (chat_id,))
-                    await conn.commit()
-
-                # Создаем таблицу участников для данного чата
-                if existing_chat or not existing_chat:
-                    await cursor.execute('''
-                            CREATE TABLE IF NOT EXISTS members_{id} (
-                                user_id INTEGER PRIMARY KEY,
-                                username TEXT,
-                                points INTEGER
-                            )
-                        '''.format(id=existing_chat[0] if existing_chat else cursor.lastrowid))
-                    await conn.commit()
-
     except Exception as e:
         print(f"Error creating table: {e}")
 
 async def add_members_to_database(chat_id: int, member_ids: list, points: int):
     try:
-        await create_table(chat_id)  # Проверка на существование таблицы
+        await create_table()  # Проверка на существование таблицы
 
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
                 for member_id in member_ids:
                     await cursor.execute('''
-                            INSERT OR IGNORE INTO members (chat_id, member_id, points)
-                            VALUES (?, ?, ?)
-                        ''', (chat_id, member_id, points))
+                        INSERT INTO members (chat_id, member_id, points)
+                        VALUES (?, ?, ?)
+                    ''', (chat_id, member_id, points))
 
                 await conn.commit()
 
@@ -220,29 +198,26 @@ async def add_toxic_words(chat_id, member_id, toxic_word):
     except Exception as e:
         print(f"Error adding toxic word: {e}")
 
+@router.message(Command('toxic'))
 async def add_toxic_word(msg: Message):
-    chat_id = msg.chat.id
-    member_id = msg.user.id
-    username = msg.user.first_name
-    toxic_word = msg.text
-    await add_toxic_words(chat_id, member_id, toxic_word)
-    # Добавление +1 балла в столбец points для участника чата
-    try:
-            table_name = f"chat_{abs(chat_id)}"
-
-            async with aiosqlite.connect('chat_members.db') as conn:
-                async with conn.cursor() as cursor:
-                    await cursor.execute('''
-                        UPDATE {table_name}
-                        SET points = points + 1
-                        WHERE member_id = ?
-                    ''', member_id)
-
-                    await conn.commit()
-    except Exception as e:
-        print(f"Error updating points: {e}")
-
+    if msg.reply_to_message:
+        chat_id = msg.chat.id
+        member_id = msg.reply_to_message.from_user.id
+        username = msg.reply_to_message.from_user.first_name
+        toxic_word = msg.reply_to_message.text  # Получаем текст сообщения, к которому отвечают
+        await add_toxic_words(chat_id, member_id, toxic_word)
+        # Добавление +1 балла в столбец points для участника чата
+        async with aiosqlite.connect('chat_members.db') as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute('''
+                    UPDATE members
+                    SET points = points + 1
+                    WHERE member_id = ? AND chat_id = ?
+                ''', (member_id, chat_id))
+                await conn.commit()
         await msg.answer(f"Слово '{toxic_word}' добавлено к пользователю {username} в базу данных и +1 балл участнику.")
+    else:
+        await msg.answer('Если ты хочешь добавить слово к токсику, ответь на его сообщение')
 
 @router.message(Command('points'))
 async def show_member_points(msg: Message):
@@ -395,26 +370,6 @@ async def predict(msg: Message):
     prediction = model.predict([text])
     if prediction == -1:
         await msg.answer(f"Сообщение токсичное")
-        await add_toxic_word(msg)
-
-async def toxic_admin(msg: Message):
-    user_id = msg.from_user.id
-    chat_id = msg.chat.id
-    table_name = f"chat_{abs(chat_id)}"
-    points = 0
-
-    async with aiosqlite.connect('chat_members.db') as conn:
-        async with conn.cursor() as cursor:
-            # Извлекаем баллы только для указанного пользователя в текущем чате
-            await cursor.execute(f'SELECT points FROM {table_name} WHERE member_id = ?', user_id,)
-            row = await cursor.fetchone()
-
-            # Проверяем, найдены ли баллы для пользователя
-            if row:
-                points = row[0]
-    if points > 10:
-        await mutie(msg)
-        await msg.answer('Ты превысил количество токсичных слов, придется тебя замьютить')
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
