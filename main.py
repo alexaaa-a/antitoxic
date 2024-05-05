@@ -240,13 +240,18 @@ async def add_toxic_word(msg: Message):
 @router.message(Command('points'))
 async def show_member_points(msg: Message):
     try:
+        member_id = msg.reply_to_message.from_user.id
         chat_id = msg.chat.id
         username = msg.reply_to_message.from_user.first_name
         table_name = f'chat_{abs(chat_id)}'
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
                 # Извлекаем баллы только для указанного пользователя
-                await cursor.execute(f'SELECT points FROM {table_name} WHERE member_id = ?', (username,))
+                await cursor.execute(f'''
+                    SELECT points 
+                    FROM {table_name} 
+                    WHERE member_id = ?
+                ''', (member_id,))
                 row = await cursor.fetchone()
 
                 # Проверяем, найдены ли баллы для пользователя
