@@ -173,11 +173,13 @@ async def add_new_tword(msg: Message):
     word = msg.reply_to_message.text
     await add_word_to_database(word, "-1")
 
+
 @router.message(Command('non-toxic'))
 async def add_new_nword(msg: Message):
     await delete_toxic_word(msg.reply_to_message)
     word = msg.reply_to_message.text
     await add_word_to_database(word, "+1")
+
 
 async def create_table(chat_id: int):
     try:
@@ -272,22 +274,40 @@ async def add_toxic_word(msg: Message):
             await conn.commit()
     await msg.answer(f"Слово '{toxic_word}' добавлено к пользователю {username} в базу данных и +1 балл участнику.")
 
+
 async def delete_toxic_words(chat_id, member_id, toxic_word):
     try:
+
         table_name = f'chat_{abs(chat_id)}'
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
                 await create_table(chat_id)
-                existing_record = await cursor.fetchone()
-                new_toxic_words = [word for word in existing_record[2] if word != toxic_word]
+
                 await cursor.execute(f'''
-                        UPDATE {table_name}
-                        SET toxic_words = ?
+                        SELECT *
+                        FROM {table_name}
                         WHERE chat_id = ? AND member_id = ?
-                    ''', (new_toxic_words, chat_id, member_id))
-                await conn.commit()
+                    ''', (chat_id, member_id))
+                existing_record = await cursor.fetchone()
+
+                if existing_record:
+                    existing_toxic_words = existing_record[2]
+                    if existing_toxic_words and toxic_word in existing_toxic_words:
+                        new_toxic_words = [word for word in existing_toxic_words.split(', ') if word != toxic_word]
+                        new_toxic_words_str = ', '.join(new_toxic_words)
+                        await cursor.execute(f'''
+                                UPDATE {table_name}
+                                SET toxic_words = ?
+                                WHERE chat_id = ? AND member_id = ?
+                            ''', (new_toxic_words_str, chat_id, member_id))
+                        await conn.commit()
+                    else:
+                        print(f"Токсичное слово '{toxic_word}' не найдено у пользователя ")
+                else:
+                    print(f"Пользователь не найден")
+
     except Exception as e:
-        print(f"Error adding toxic word: {e}")
+        print(f"Error deleting toxic word: {e}")
 
 
 async def delete_toxic_word(msg: Message):
@@ -295,16 +315,20 @@ async def delete_toxic_word(msg: Message):
     table_name = f'chat_{abs(chat_id)}'
     member_id = msg.from_user.id
     username = msg.from_user.first_name
-    toxic_word = msg.text 
+    toxic_word = msg.text
     await delete_toxic_words(chat_id, member_id, toxic_word)
-    async with aiosqlite.connect('chat_members.db') as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(f'''
-                UPDATE {table_name}
-                SET points = points - 1
-                WHERE member_id = ? AND chat_id = ?
-            ''', (member_id, chat_id))
-            await conn.commit()
+    try:
+        async with aiosqlite.connect('chat_members.db') as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(f'''
+                    UPDATE {table_name}
+                    SET points = points - 1
+                    WHERE member_id = ? AND chat_id = ?
+                ''', (member_id, chat_id))
+                await conn.commit()
+    except Exception as e:
+        print(f"Error updating points: {e}")
+
     await msg.answer(f"Слово '{toxic_word}' удалено у пользователя {username}")
 
 
