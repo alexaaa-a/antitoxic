@@ -279,7 +279,7 @@ async def delete_toxic_words(chat_id, member_id, toxic_word):
             async with conn.cursor() as cursor:
                 await create_table(chat_id)
                 existing_record = await cursor.fetchone()
-                new_toxic_words = existing_record[2].remove(toxic_word)
+                new_toxic_words = [word for word in existing_record[2] if word != toxic_word]
                 await cursor.execute(f'''
                         UPDATE {table_name}
                         SET toxic_words = ?
