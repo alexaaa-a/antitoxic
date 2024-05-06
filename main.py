@@ -8,6 +8,7 @@ from aiogram import Dispatcher
 from aiogram.enums.parse_mode import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 import config
+import aioschedule
 from aiogram.methods import get_chat_member
 from aiogram import types, F, Router, Bot
 from aiogram.types import Message
@@ -46,7 +47,8 @@ async def start_handler(msg: Message):
                     types.KeyboardButton(text="/mute"),
                     types.KeyboardButton(text="/toxic"),
                     types.KeyboardButton(text="/non-toxic"),
-                    types.KeyboardButton(text="/points")
+                    types.KeyboardButton(text="/points"),
+                    types.KeyboardButton(text="/stats")
                 ],
             ]
             keyboard = types.ReplyKeyboardMarkup(
@@ -139,10 +141,10 @@ async def additional_training(conn):
             new_toxic_data.append(word)
             labels.append(label)
     new_toxic_data.append("Привет, как дела?")
-    label += ["+1"] 
+    label += ["+1"]
     new_toxic_data.append("Ты тупой, раз не можешь решить такую простую задачу")
-    label += ["-1"] 
-    
+    label += ["-1"]
+
     model.fit(new_toxic_data, labels)
 
     await conn.execute('UPDATE words SET word = NULL, label = NULL')
@@ -211,10 +213,11 @@ async def add_members_to_database(chat_id: int, member_ids: list, points: int):
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
                 for member_id in member_ids:
-                    await cursor.execute(f'''
-                        INSERT INTO {table_name} (chat_id, member_id, points)
-                        VALUES (?, ?, ?)
-                    ''', (chat_id, member_id, points))
+                    if member_id != 6612359471:  # Проверка, что member_id не равен ID вашего бота
+                        await cursor.execute(f'''
+                                INSERT INTO {table_name} (chat_id, member_id, points)
+                                VALUES (?, ?, ?)
+                            ''', (chat_id, member_id, points))
 
                 await conn.commit()
 
@@ -260,29 +263,48 @@ async def add_toxic_words(chat_id, member_id, toxic_word):
 
 async def add_toxic_word(msg: Message):
     chat_id = msg.chat.id
+    table_name = f'chat_{abs(chat_id)}'
     member_id = msg.from_user.id
     username = msg.from_user.first_name
     toxic_word = msg.text
     await add_toxic_words(chat_id, member_id, toxic_word)
-
     async with aiosqlite.connect('chat_members.db') as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(f'''
-                UPDATE OR INSERT INTO chat_{abs(chat_id)} (chat_id, member_id, toxic_words, points)
-                VALUES (?, ?, ?, COALESCE((SELECT points FROM chat_{abs(chat_id)} WHERE member_id = ?), 0) + 1)
-            ''', (chat_id, member_id, toxic_word, member_id))
-
-            await conn.commit()
-
-            points = await cursor.execute(f'''
-                SELECT points 
-                FROM chat_{abs(chat_id)} 
-                WHERE member_id = ?
-            ''', (member_id,)).fetchone()[0]
-
-    message = random.choice(success_messages) if points > 0 else random.choice(no_points_messages)
-    response_message = message.format(toxic_word=toxic_word, username=username, points=points)
-    await msg.answer(response_message)
+                        SELECT points 
+                        FROM {table_name} 
+                        WHERE member_id = ?
+                    ''', (member_id,))
+            row = await cursor.fetchone()
+            if row:
+                points = row[0]
+                if points > 0:
+                    await cursor.execute(f'''
+                                UPDATE {table_name}
+                                SET points = points + 1
+                                WHERE member_id = ? AND chat_id = ?
+                            ''', (member_id, chat_id))
+                    await conn.commit()
+                    success_message = random.choice(success_messages).format(
+                        toxic_word=toxic_word,
+                        username=username,
+                        points=points + 1
+                    )
+                    await msg.answer(success_message)
+                else:
+                    await cursor.execute(f'''
+                                UPDATE {table_name}
+                                SET points = points + 1
+                                WHERE member_id = ? AND chat_id = ?
+                            ''', (member_id, chat_id))
+                    await conn.commit()
+                    no_points_message = random.choice(no_points_messages).format(
+                        toxic_word=toxic_word,
+                        username=username
+                    )
+                    await msg.answer(no_points_message)
+            else:
+                print("Ошибка при выполнении запроса.")
 
 
 async def delete_toxic_words(chat_id, member_id, toxic_word):
@@ -294,10 +316,10 @@ async def delete_toxic_words(chat_id, member_id, toxic_word):
                 await create_table(chat_id)
 
                 await cursor.execute(f'''
-                        SELECT *
-                        FROM {table_name}
-                        WHERE chat_id = ? AND member_id = ?
-                    ''', (chat_id, member_id))
+                            SELECT *
+                            FROM {table_name}
+                            WHERE chat_id = ? AND member_id = ?
+                        ''', (chat_id, member_id))
                 existing_record = await cursor.fetchone()
 
                 if existing_record:
@@ -306,10 +328,10 @@ async def delete_toxic_words(chat_id, member_id, toxic_word):
                         new_toxic_words = [word for word in existing_toxic_words.split(', ') if word != toxic_word]
                         new_toxic_words_str = ', '.join(new_toxic_words)
                         await cursor.execute(f'''
-                                UPDATE {table_name}
-                                SET toxic_words = ?
-                                WHERE chat_id = ? AND member_id = ?
-                            ''', (new_toxic_words_str, chat_id, member_id))
+                                    UPDATE {table_name}
+                                    SET toxic_words = ?
+                                    WHERE chat_id = ? AND member_id = ?
+                                ''', (new_toxic_words_str, chat_id, member_id))
                         await conn.commit()
                     else:
                         print(f"Токсичное слово '{toxic_word}' не найдено у пользователя ")
@@ -319,7 +341,6 @@ async def delete_toxic_words(chat_id, member_id, toxic_word):
     except Exception as e:
         print(f"Error deleting toxic word: {e}")
 
-
 async def delete_toxic_word(msg: Message):
     chat_id = msg.chat.id
     table_name = f'chat_{abs(chat_id)}'
@@ -327,6 +348,7 @@ async def delete_toxic_word(msg: Message):
     username = msg.from_user.first_name
     toxic_word = msg.text
 
+    await delete_toxic_words(chat_id, member_id, toxic_word)
     async with aiosqlite.connect('chat_members.db') as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(f'''
@@ -367,7 +389,10 @@ async def show_member_points(msg: Message):
                 row = await cursor.fetchone()
                 if row:
                     points = row[0]
-                    response = random.choice(more_points).format(username=username, points=points)
+                    if points > 0:
+                        response = random.choice(more_points).format(username=username, points=points)
+                    else:
+                        response = random.choice(zero_points).format(username=username)
                 else:
                     response = random.choice(zero_points).format(username=username)
 
@@ -390,33 +415,65 @@ async def get_all_member_points(chat_id):
         logging.error(f'Ошибка при выполнении запроса: {e}')
         return None
 
-
-async def calculate_toxicity(user_id, user_points, all_member_points):
+async def calculate_toxicity(points, all_member_points):
     total_points = sum(points for _, points in all_member_points)
-    user_toxicity = (user_points / total_points) * 100
+    user_toxicity = (points / total_points) * 100
     return user_toxicity
 
 
-@router.message(Command('toxicity_stats'))
+@router.message(Command('stats'))
 async def toxicity_stats_command(msg: Message):
-    chat_id = msg.chat.id
     replied_user_id = msg.reply_to_message.from_user.id
-    username = msg.reply_to_message.from_user.first_name
+    chat_id = msg.chat.id
     all_member_points = await get_all_member_points(chat_id)
+    username = msg.reply_to_message.from_user.first_name
 
     if all_member_points:
         user_points = dict(all_member_points).get(replied_user_id)
 
         if user_points:
-            toxicity_percent = await calculate_toxicity(replied_user_id, user_points, all_member_points)
-            response = f'{username} имеет токсичность на уровне {toxicity_percent:.2f}% по сравнению с другими участниками группы.'
+            toxicity_percent = await calculate_toxicity(user_points, all_member_points)
+            await msg.answer(f"Участник {username} имеет токсичность на уровне {toxicity_percent:.2f}% по сравнению с другими участниками группы.")
         else:
-            response = f'{username} не найден в базе данных.'
+            await msg.answer(f"Участник с ID {username} не найден в базе данных.")
     else:
-        response = 'Произошла ошибка при выполнении запроса для получения данных участников.'
+        await msg.answer('Произошла ошибка при выполнении запроса для получения данных участников.')
 
-    await msg.answer(response, parse_mode=ParseMode.HTML)
 
+@router.message(Command('top'))
+async def top(msg: Message):
+    chat_id = msg.chat.id
+    table_name = f'chat_{abs(chat_id)}'
+    async with aiosqlite.connect('chat_members.db') as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(f'''
+                SELECT member_id, points 
+                FROM {table_name}''')
+            rows = await cursor.fetchall()
+            tops = {row[0]: row[1] for row in rows}
+
+    sorted_top = sorted(tops.items(), key=lambda x: x[1], reverse=True)
+    if sorted_top[0][1] == 0:
+        await msg.answer('Топ пуст... Сначала станьте токсиками!')
+    else:
+        await msg.answer('Внимание, друзьяшки! Топ токсичности за сегодня:')
+
+        for member_id, points in sorted_top:
+            chat_member = await msg.bot.get_chat_member(chat_id, member_id)
+            username = chat_member.user.first_name
+            await msg.answer(f'{username}: {points} баллов')
+        async with aiosqlite.connect('chat_members.db') as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(f'''
+                        SELECT toxic_words 
+                        FROM {table_name}
+                        WHERE member_id = ?
+                    ''', (sorted_top[0][0],))
+                toxic_words = await cursor.fetchone()
+        top_member_id = sorted_top[0][0]
+        top_chat_member = await msg.bot.get_chat_member(chat_id, top_member_id)
+        top_username = top_chat_member.user.first_name
+        await msg.answer(f'{top_username} стал(а) королем токсичности, позор! Токсичные сообщения: {toxic_words[0]}')
 
 @router.message(Command('chat_stats'))
 async def chat_stats(msg: Message):
@@ -485,13 +542,13 @@ async def get_toxic_words(msg: Message):
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(f'''
-                    SELECT toxic_words 
-                    FROM {table_name}
-                    WHERE member_id = ?
-                ''', (member_id,))
+                        SELECT toxic_words 
+                        FROM {table_name}
+                        WHERE member_id = ?
+                    ''', (member_id,))
                 toxic_words = await cursor.fetchone()
 
-                if toxic_words is not None:
+                if toxic_words[0] is not None:  # Проверяем наличие токсичных слов
                     await msg.answer(f"Токсичные слова {username}: {toxic_words[0]}")
                 else:
                     await msg.answer(f"Пока что у {username} нет токсичных слов! Молодец!")
