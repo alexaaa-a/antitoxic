@@ -175,16 +175,28 @@ async def add_word_to_database(word: str, label: str):
 
 @router.message(Command('toxic'))
 async def add_new_tword(msg: Message):
-    await add_toxic_word(msg.reply_to_message)
-    word = msg.reply_to_message.text
-    await add_word_to_database(word, "-1")
+    user_id = msg.user.id
+    chat_id = msg.chat.id
+    user_status = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+    if user_status.status == 'administrator' or user_status.status == 'creator':
+        await add_toxic_word(msg.reply_to_message)
+        word = msg.reply_to_message.text
+        await add_word_to_database(word, "-1")
+    else:
+        await msg.answer('Солнышко, тебе не хватает прав для совершения этого действия')
 
 
 @router.message(Command('non-toxic'))
 async def add_new_nword(msg: Message):
-    await delete_toxic_word(msg.reply_to_message)
-    word = msg.reply_to_message.text
-    await add_word_to_database(word, "+1")
+    user_id = msg.user.id
+    chat_id = msg.chat.id
+    user_status = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+    if user_status.status == 'administrator' or user_status.status == 'creator':
+        await delete_toxic_word(msg.reply_to_message)
+        word = msg.reply_to_message.text
+        await add_word_to_database(word, "+1")
+    else:
+        await msg.answer('Солнышко, тебе не хватает прав для совершения этого действия')
 
 
 async def create_table(chat_id: int):
@@ -549,12 +561,12 @@ async def get_toxic_words(msg: Message):
                 toxic_words = await cursor.fetchone()
 
                 if toxic_words[0] is not None:  # Проверяем наличие токсичных слов
-                    await msg.answer(f"Токсичные слова {username}: {toxic_words[0]}")
+                    await msg.answer(f"Токсичные сообщения {username}: {toxic_words[0]}")
                 else:
-                    await msg.answer(f"Пока что у {username} нет токсичных слов! Молодец!")
+                    await msg.answer(f"Пока что у {username} нет токсичных сообщений! Молодец!")
     except aiosqlite.Error as e:
-        logging.error(f'Ошибка при получении токсичных слов: {e}')
-        await msg.answer('Произошла ошибка при получении токсичных слов.')
+        logging.error(f'Ошибка при получении токсичных сообщений: {e}')
+        await msg.answer('Произошла ошибка при получении токсичных сообщений.')
 
 
 @router.message(Command('mute'))
