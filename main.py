@@ -111,7 +111,8 @@ async def create_table_words():
                 await cursor.execute('''
                     CREATE TABLE IF NOT EXISTS words (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        word TEXT
+                        word TEXT,
+                        label TEXT
                     )
                 ''')
                 await conn.commit()
@@ -127,36 +128,35 @@ async def reset_and_recreate_table(chat_id):
 
 async def additional_training(conn):
     new_toxic_data = []
-    toxic = ["-1"] * 100
-    async with conn.execute('SELECT word FROM words') as cursor:
+    labels = []
+    async with conn.execute('SELECT word, labels FROM words') as cursor:
         async for string in cursor:
-            new_toxic_data.append(string[0])
-    new_toxic_data.append("Привет, как дела?", "Доброе утро, как настроение?", "Пока, до встречи!",
-                          "Молодец, ты справишься!", "Здравствуй, как твои дела?", "До свидания, будь здоров!",
-                          "Отлично, продолжай в том же духе!", "Приветствую, как прошел день?",
-                          "Спокойной ночи, приятных снов!", "Удачи, ты сможешь все!", "Вечер добрый, как прошел день?",
-                          "До скорой встречи!", "Поздравляю!", "Добрый день, какие у тебя планы?",
-                          "Спасибо, что ты есть рядом!", "Доброй ночи!", "Ты молодец, не сомневайся!",
-                          "Здравствуй, как прошла неделя?")
-    toxic += ["+1"] * len(new_toxic_data)
+            word, label = string
+            new_toxic_data.append(word)
+            labels.append(label)
+    new_toxic_data.append("Привет, как дела?")
+    label += ["+1"] 
+    new_toxic_data.append("Ты тупой, раз не можешь решить такую простую задачу")
+    label += ["-1"] 
+    
     model.fit(new_toxic_data, toxic)
 
-    await conn.execute('UPDATE toxic_message SET message = NULL')
+    await conn.execute('UPDATE words SET word = NULL, label = NULL')
     await conn.commit()
 
     joblib.dump(model, 'model.pkl')
 
 
-async def add_word_to_database(word: str):
+async def add_word_to_database(word: str, label: str):
     await create_table_words()
 
     try:
         async with aiosqlite.connect('words.db') as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute('''
-                    INSERT INTO words (word)
-                    VALUES (?)
-                ''', (word,))
+                    INSERT INTO words (word, label)
+                    VALUES (?, ?)
+                ''', (word, label))
                 await conn.commit()
                 await cursor.execute('SELECT COUNT(word) FROM words')
                 count_message = await cursor.fetchone()
@@ -168,11 +168,16 @@ async def add_word_to_database(word: str):
 
 
 @router.message(Command('toxic'))
-async def add_new_word(msg: Message):
+async def add_new_tword(msg: Message):
     await add_toxic_word(msg.reply_to_message)
     word = msg.reply_to_message.text
-    await add_word_to_database(word)
+    await add_word_to_database(word, "-1")
 
+@router.message(Command('non-toxic'))
+async def add_new_nword(msg: Message):
+    await delete_toxic_word(msg.reply_to_message)
+    word = msg.reply_to_message.text
+    await add_word_to_database(word, "+1")
 
 async def create_table(chat_id: int):
     try:
@@ -249,12 +254,12 @@ async def add_toxic_words(chat_id, member_id, toxic_word):
         print(f"Error adding toxic word: {e}")
 
 
-async def add_toxic_word(msg: Message, word: str):
+async def add_toxic_word(msg: Message):
     chat_id = msg.chat.id
     table_name = f'chat_{abs(chat_id)}'
     member_id = msg.from_user.id
     username = msg.from_user.first_name
-    toxic_word = word  # Получаем текст сообщения, к которому отвечают
+    toxic_word = msg.text 
     await add_toxic_words(chat_id, member_id, toxic_word)
     # Добавление +1 балла в столбец points для участника чата
     async with aiosqlite.connect('chat_members.db') as conn:
@@ -266,6 +271,41 @@ async def add_toxic_word(msg: Message, word: str):
             ''', (member_id, chat_id))
             await conn.commit()
     await msg.answer(f"Слово '{toxic_word}' добавлено к пользователю {username} в базу данных и +1 балл участнику.")
+
+async def delete_toxic_words(chat_id, member_id, toxic_word):
+    try:
+        table_name = f'chat_{abs(chat_id)}'
+        async with aiosqlite.connect('chat_members.db') as conn:
+            async with conn.cursor() as cursor:
+                await create_table(chat_id)
+                existing_record = await cursor.fetchone()
+                new_toxic_words = existing_record[2].remove(toxic_word)
+                await cursor.execute(f'''
+                        UPDATE {table_name}
+                        SET toxic_words = ?
+                        WHERE chat_id = ? AND member_id = ?
+                    ''', (new_toxic_words, chat_id, member_id))
+                await conn.commit()
+    except Exception as e:
+        print(f"Error adding toxic word: {e}")
+
+
+async def delete_toxic_word(msg: Message):
+    chat_id = msg.chat.id
+    table_name = f'chat_{abs(chat_id)}'
+    member_id = msg.from_user.id
+    username = msg.from_user.first_name
+    toxic_word = msg.text 
+    await delete_toxic_words(chat_id, member_id, toxic_word)
+    async with aiosqlite.connect('chat_members.db') as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(f'''
+                UPDATE {table_name}
+                SET points = points - 1
+                WHERE member_id = ? AND chat_id = ?
+            ''', (member_id, chat_id))
+            await conn.commit()
+    await msg.answer(f"Слово '{toxic_word}' удалено у пользователя {username}")
 
 
 @router.message(Command('points'))
@@ -457,10 +497,7 @@ async def predict(msg: Message):
     text = msg.text
     prediction = model.predict([text])
     if prediction == -1:
-        text = text.split()
-        for x in text:
-            if model.predict([x]) == -1:
-                await add_toxic_word(msg, x)
+        await add_toxic_word(msg)
 
 
 if __name__ == "__main__":
