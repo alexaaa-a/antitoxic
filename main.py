@@ -45,6 +45,7 @@ async def start_handler(msg: Message):
                     types.KeyboardButton(text="/unban"),
                     types.KeyboardButton(text="/mute"),
                     types.KeyboardButton(text="/toxic"),
+                    types.KeyboardButton(text="/non-toxic"),
                     types.KeyboardButton(text="/points")
                 ],
             ]
@@ -58,7 +59,8 @@ async def start_handler(msg: Message):
             chat_id = msg.chat.id
             await reset_and_recreate_table(chat_id)
             chat_members = await get_chat_members(chat_id)
-            await msg.answer(f'Участники чата успешно добавлены!')
+            await msg.answer(f'Я получил все необходимые данные! Вот список команд:')
+            await msg.answer(f'*описание команд*')
             await add_members_to_database(chat_id, chat_members, points=0)
         except aiogram.exceptions.TelegramBadRequest as e:
             logging.error(f'Ошибка при выполнении запроса: {e}')
@@ -258,45 +260,29 @@ async def add_toxic_words(chat_id, member_id, toxic_word):
 
 async def add_toxic_word(msg: Message):
     chat_id = msg.chat.id
-    table_name = f'chat_{abs(chat_id)}'
     member_id = msg.from_user.id
     username = msg.from_user.first_name
-    toxic_word = msg.text 
+    toxic_word = msg.text
     await add_toxic_words(chat_id, member_id, toxic_word)
+
     async with aiosqlite.connect('chat_members.db') as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(f'''
-                            SELECT points 
-                            FROM {table_name} 
-                            WHERE member_id = ?
-                        ''', (member_id,))
-            row = await cursor.fetchone()
-            if row:
-                points = row[0]
-                await cursor.execute(f'''
-                    UPDATE {table_name}
-                    SET points = points + 1
-                    WHERE member_id = ? AND chat_id = ?
-                ''', (member_id, chat_id))
-                await conn.commit()
-                success_message = random.choice(success_messages).format(
-                    toxic_word=toxic_word,
-                    username=username,
-                    points=points
-                )
-                await msg.answer(success_message)
-            else:
-                await cursor.execute(f'''
-                    UPDATE {table_name}
-                    SET points = points + 1
-                    WHERE member_id = ? AND chat_id = ?
-                ''', (member_id, chat_id))
-                await conn.commit()
-                no_points_message = random.choice(no_points_messages).format(
-                    toxic_word=toxic_word,
-                    username=username
-                )
-                await msg.answer(no_points_message)
+                UPDATE OR INSERT INTO chat_{abs(chat_id)} (chat_id, member_id, toxic_words, points)
+                VALUES (?, ?, ?, COALESCE((SELECT points FROM chat_{abs(chat_id)} WHERE member_id = ?), 0) + 1)
+            ''', (chat_id, member_id, toxic_word, member_id))
+
+            await conn.commit()
+
+            points = await cursor.execute(f'''
+                SELECT points 
+                FROM chat_{abs(chat_id)} 
+                WHERE member_id = ?
+            ''', (member_id,)).fetchone()[0]
+
+    message = random.choice(success_messages) if points > 0 else random.choice(no_points_messages)
+    response_message = message.format(toxic_word=toxic_word, username=username, points=points)
+    await msg.answer(response_message)
 
 
 async def delete_toxic_words(chat_id, member_id, toxic_word):
@@ -340,20 +326,28 @@ async def delete_toxic_word(msg: Message):
     member_id = msg.from_user.id
     username = msg.from_user.first_name
     toxic_word = msg.text
-    await delete_toxic_words(chat_id, member_id, toxic_word)
-    try:
-        async with aiosqlite.connect('chat_members.db') as conn:
-            async with conn.cursor() as cursor:
+
+    async with aiosqlite.connect('chat_members.db') as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(f'''
+                SELECT points 
+                FROM {table_name} 
+                WHERE member_id = ?
+            ''', (member_id,))
+            row = await cursor.fetchone()
+            points = row[0] if row else 0
+
+            if points > 0:
                 await cursor.execute(f'''
                     UPDATE {table_name}
                     SET points = points - 1
                     WHERE member_id = ? AND chat_id = ?
                 ''', (member_id, chat_id))
                 await conn.commit()
-    except Exception as e:
-        print(f"Error updating points: {e}")
-
-    await msg.answer(f"Слово '{toxic_word}' удалено у пользователя {username}")
+                await msg.answer(
+                    f"Слово '{toxic_word}' удалено у пользователя {username}. Теперь у него {points - 1} баллов.")
+            else:
+                await msg.answer(f"У пользователя {username} и так нет токсичных сообщений.")
 
 
 @router.message(Command('points'))
