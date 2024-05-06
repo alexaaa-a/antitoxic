@@ -139,7 +139,7 @@ async def additional_training(conn):
     new_toxic_data.append("Ты тупой, раз не можешь решить такую простую задачу")
     label += ["-1"] 
     
-    model.fit(new_toxic_data, toxic)
+    model.fit(new_toxic_data, labels)
 
     await conn.execute('UPDATE words SET word = NULL, label = NULL')
     await conn.commit()
