@@ -60,9 +60,9 @@ async def start_handler(msg: Message):
             chat_members = await get_chat_members(chat_id)
             await msg.answer(f'Я получил все необходимые данные! Вот список команд:')
             await msg.answer(
-                '/ban - можешь забанить участника:(\n/unban - можешь разбанить участника\n/mute - можешь замьютить участника\n'
+                '/ban - можешь забанить участника :(\n/unban - можешь разбанить участника\n/mute - можешь замьютить участника\n'
                 '/toxic - можешь добавить это слово в токсичный список\n'
-                '/non-toxic - можешь убрать это слово из токсичного списка\n'
+                '/non_toxic - можешь убрать это слово из токсичного списка\n'
                 '/points - можешь посмотреть сколько у тебя баллов\n'
                 '/stats - можешь посмотреть свою статистику плохих слов\n'
                 '/top - статистика всех участников группы\n'
@@ -190,7 +190,7 @@ async def add_word_to_database(word: str, label: str):
 
 @router.message(Command('toxic'))
 async def add_new_tword(msg: Message):
-    user_id = msg.user.id
+    user_id = msg.from_user.id
     chat_id = msg.chat.id
     user_status = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
     if user_status.status == 'administrator' or user_status.status == 'creator':
@@ -201,7 +201,7 @@ async def add_new_tword(msg: Message):
         await msg.answer('Солнышко, тебе не хватает прав для совершения этого действия')
 
 
-@router.message(Command('non-toxic'))
+@router.message(Command('non_toxic'))
 async def add_new_nword(msg: Message):
     user_id = msg.user.id
     chat_id = msg.chat.id
