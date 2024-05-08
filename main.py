@@ -42,11 +42,8 @@ async def start_handler(msg: Message):
         try:
             kb = [
                 [
-                    types.KeyboardButton(text="/ban"),
-                    types.KeyboardButton(text="/unban"),
-                    types.KeyboardButton(text="/mute"),
-                    types.KeyboardButton(text="/toxic"),
-                    types.KeyboardButton(text="/non-toxic"),
+                    types.KeyboardButton(text="/toxic_words"),
+                    types.KeyboardButton(text="/help"),
                     types.KeyboardButton(text="/points"),
                     types.KeyboardButton(text="/stats")
                 ],
@@ -62,20 +59,30 @@ async def start_handler(msg: Message):
             await reset_and_recreate_table(chat_id)
             chat_members = await get_chat_members(chat_id)
             await msg.answer(f'Я получил все необходимые данные! Вот список команд:')
-            await msg.answer('/ban - можешь забанить участника:('
-                 '/unban - можешь разбанить участника'
-                 '/mute - можешь замьютить участника'
-                 '/toxic - можешь добавить это слово в токсичный список'
-                 '/non-toxic - можешь убрать это слово из токсичного списка'
-                 '/points - можешь посмотреть сколько у тебя баллов'
-                 '/stats - можешь посмотреть свою статистику плохих слов'
-                 '/top - статистика всех участников группы'
-                 '/toxic_words - список твоих плохих слов')
+            await msg.answer(
+                '/ban - можешь забанить участника:(\n/unban - можешь разбанить участника\n/mute - можешь замьютить участника\n'
+                '/toxic - можешь добавить это слово в токсичный список\n'
+                '/non-toxic - можешь убрать это слово из токсичного списка\n'
+                '/points - можешь посмотреть сколько у тебя баллов\n'
+                '/stats - можешь посмотреть свою статистику плохих слов\n'
+                '/top - статистика всех участников группы\n'
+                '/toxic_words - список твоих плохих слов\n')
             await add_members_to_database(chat_id, chat_members, points=0)
         except aiogram.exceptions.TelegramBadRequest as e:
             logging.error(f'Ошибка при выполнении запроса: {e}')
     else:
         await msg.answer('Котик, у тебя недостаточно прав для запуска бота!')
+
+@router.message(Command('help'))
+async def commamds(msg: Message):
+    await msg.answer('Список команд бота:')
+    await msg.answer('/ban - можешь забанить участника:(\n/unban - можешь разбанить участника\n/mute - можешь замьютить участника\n'
+                     '/toxic - можешь добавить это слово в токсичный список\n'
+                     '/non-toxic - можешь убрать это слово из токсичного списка\n'
+                     '/points - можешь посмотреть сколько у тебя баллов\n'
+                     '/stats - можешь посмотреть свою статистику плохих слов\n'
+                     '/top - статистика всех участников группы\n'
+                     '/toxic_words - список твоих плохих слов\n')
 
 
 async def main():
