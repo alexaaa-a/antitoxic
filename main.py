@@ -62,7 +62,15 @@ async def start_handler(msg: Message):
             await reset_and_recreate_table(chat_id)
             chat_members = await get_chat_members(chat_id)
             await msg.answer(f'Я получил все необходимые данные! Вот список команд:')
-            await msg.answer(f'*описание команд*')
+            await msg.answer('/ban - можешь забанить участника:('
+                 '/unban - можешь разбанить участника'
+                 '/mute - можешь замьютить участника'
+                 '/toxic - можешь добавить это слово в токсичный список'
+                 '/non-toxic - можешь убрать это слово из токсичного списка'
+                 '/points - можешь посмотреть сколько у тебя баллов'
+                 '/stats - можешь посмотреть свою статистику плохих слов'
+                 '/top - статистика всех участников группы'
+                 '/toxic_words - список твоих плохих слов')
             await add_members_to_database(chat_id, chat_members, points=0)
         except aiogram.exceptions.TelegramBadRequest as e:
             logging.error(f'Ошибка при выполнении запроса: {e}')
