@@ -525,9 +525,28 @@ async def top():
 
     for chat_id, message in message_data:
         await bot.send_message(chat_id, message)
+
+async def reset_toxic_words():
+    try:
+        async with aiosqlite.connect('chat_members.db') as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = await cursor.fetchall()
+                for table in tables:
+                    table_name = table[0]
+                    await cursor.execute(f"PRAGMA table_info({table_name})")
+                    columns = await cursor.fetchall()
+                    column_names = [column[1] for column in columns]
+                    if 'toxic_words' in column_names:
+                        await cursor.execute(f'UPDATE {table_name} SET toxic_words = NULL, points = 0')
+                await conn.commit()
+    except Exception as e:
+        print(f"Error resetting toxic words: {e}")
+
 async def start_scheduler():
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(top, 'cron', hour=22, minute=12)  # Вызов команды /top в 00:00 каждый день
+    scheduler.add_job(reset_toxic_words, 'cron', hour=0, minute=0)
+    scheduler.add_job(top, 'cron', hour=0, minute=0)  # Вызов команды /top в 00:00 каждый день
     scheduler.start()
 
 @router.message(Command('chat_stats'))
