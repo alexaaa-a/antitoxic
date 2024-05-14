@@ -8,19 +8,20 @@ from aiogram import Dispatcher
 from aiogram.enums.parse_mode import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 import config
-import aioschedule
-from aiogram.methods import get_chat_member
-from aiogram import types, F, Router, Bot
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from aiogram import F, Router, Bot
 from aiogram.types import Message
 from aiogram.filters.chat_member_updated import \
     ChatMemberUpdatedFilter, KICKED, LEFT, \
     RESTRICTED, MEMBER, ADMINISTRATOR, CREATOR
-from aiogram.types import ChatMemberUpdated
+from aiogram.types import ChatMemberUpdated, Chat
 from aiogram.filters.command import Command
 import asyncio
-import aiosqlite
 import random
 from messages import *
+import aiosqlite
+from datetime import datetime
+from aiogram import types
 
 router = Router()
 
@@ -42,8 +43,8 @@ async def start_handler(msg: Message):
         try:
             kb = [
                 [
-                    types.KeyboardButton(text="/toxic_words"),
                     types.KeyboardButton(text="/help"),
+                    types.KeyboardButton(text="/words"),
                     types.KeyboardButton(text="/points"),
                     types.KeyboardButton(text="/stats")
                 ],
@@ -52,22 +53,13 @@ async def start_handler(msg: Message):
                 keyboard=kb,
                 resize_keyboard=True,
             )
-            await msg.answer(
-                'Мяяу!! Я - бот для определения токсиков и душнил в твоих чатах :) Выбери нужную кнопочку и жмякни по ней!')
-            await msg.answer('Кнопочки для вас, мои котики!', reply_markup=keyboard)
+            await msg.answer(random.choice(hello))
+            await msg.answer('*описание бота', )
             chat_id = msg.chat.id
             await reset_and_recreate_table(chat_id)
             chat_members = await get_chat_members(chat_id)
-            await msg.answer(f'Я получил все необходимые данные! Вот список команд:')
-            await msg.answer(
-                '/ban - можешь забанить участника :(\n/unban - можешь разбанить участника\n/mute - можешь замьютить участника\n'
-                '/toxic - можешь добавить это слово в токсичный список\n'
-                '/non_toxic - можешь убрать это слово из токсичного списка\n'
-                '/points - можешь посмотреть сколько у тебя баллов\n'
-                '/stats - можешь посмотреть свою статистику плохих слов\n'
-                '/top - статистика всех участников группы\n'
-                '/toxic_words - список твоих плохих слов\n')
             await add_members_to_database(chat_id, chat_members, points=0)
+            await msg.answer(f'Я получил все необходимые данные и готов к работе!', reply_markup=keyboard)
         except aiogram.exceptions.TelegramBadRequest as e:
             logging.error(f'Ошибка при выполнении запроса: {e}')
     else:
@@ -75,19 +67,35 @@ async def start_handler(msg: Message):
 
 @router.message(Command('help'))
 async def commamds(msg: Message):
+    user_id = msg.from_user.id
+    user_status = await bot.get_chat_member(chat_id=msg.chat.id, user_id=user_id)
     await msg.answer('Список команд бота:')
-    await msg.answer('/ban - можешь забанить участника:(\n/unban - можешь разбанить участника\n/mute - можешь замьютить участника\n'
-                     '/toxic - можешь добавить это слово в токсичный список\n'
-                     '/non-toxic - можешь убрать это слово из токсичного списка\n'
-                     '/points - можешь посмотреть сколько у тебя баллов\n'
-                     '/stats - можешь посмотреть свою статистику плохих слов\n'
-                     '/top - статистика всех участников группы\n'
-                     '/toxic_words - список твоих плохих слов\n')
+    if user_status.status == 'creator':
+        await msg.answer('/ban - можешь забанить участника:('
+                         '\n/unban - можешь разбанить участника\n/mute - можешь замьютить участника\n'
+                         '/toxic - можешь добавить это слово в токсичный список\n'
+                         '/non-toxic - можешь убрать это слово из токсичного списка\n'
+                         '/points - можешь посмотреть сколько у тебя баллов\n'
+                         '/stats - можешь посмотреть свою статистику плохих слов\n'
+                         '/toxic_words - список твоих плохих слов\n')
+    elif user_status.status == 'administrator':
+        await msg.answer('/mute - можешь замьютить участника\n'
+                         '/toxic - можешь добавить это слово в токсичный список\n'
+                         '/non-toxic - можешь убрать это слово из токсичного списка\n'
+                         '/points - можешь посмотреть сколько у тебя баллов\n'
+                         '/stats - можешь посмотреть свою статистику плохих слов\n'
+                         '/toxic_words - список твоих плохих слов\n')
+    else:
+        await msg.answer('/points - можешь посмотреть сколько у тебя баллов\n'
+                         '/stats - можешь посмотреть свою статистику плохих слов\n'
+                         '/top - статистика всех участников группы\n'
+                         '/toxic_words - список твоих плохих слов\n')
 
 
 async def main():
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)
+    await start_scheduler()
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
 
@@ -467,40 +475,60 @@ async def toxicity_stats_command(msg: Message):
         await msg.answer('Произошла ошибка при выполнении запроса для получения данных участников.')
 
 
-@router.message(Command('top'))
-async def top(msg: Message):
-    chat_id = msg.chat.id
-    table_name = f'chat_{abs(chat_id)}'
+async def top():
     async with aiosqlite.connect('chat_members.db') as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(f'''
-                SELECT member_id, points 
-                FROM {table_name}''')
-            rows = await cursor.fetchall()
-            tops = {row[0]: row[1] for row in rows}
+                SELECT name 
+                FROM sqlite_master
+                WHERE type='table';''')
+            tables = await cursor.fetchall()
+            tables = tables[1:]
 
-    sorted_top = sorted(tops.items(), key=lambda x: x[1], reverse=True)
-    if sorted_top[0][1] == 0:
-        await msg.answer('Топ пуст... Сначала станьте токсиками!')
-    else:
-        await msg.answer('Внимание, друзьяшки! Топ токсичности за сегодня:')
+    message_data = []
 
-        for member_id, points in sorted_top:
-            chat_member = await msg.bot.get_chat_member(chat_id, member_id)
-            username = chat_member.user.first_name
-            await msg.answer(f'{username}: {points} баллов')
+    for i in range(len(tables)):
+        chat_id = int('-' + tables[i][0][5:])
+        table_name = f'chat_{abs(chat_id)}'
         async with aiosqlite.connect('chat_members.db') as conn:
             async with conn.cursor() as cursor:
                 await cursor.execute(f'''
-                        SELECT toxic_words 
-                        FROM {table_name}
-                        WHERE member_id = ?
-                    ''', (sorted_top[0][0],))
-                toxic_words = await cursor.fetchone()
-        top_member_id = sorted_top[0][0]
-        top_chat_member = await msg.bot.get_chat_member(chat_id, top_member_id)
-        top_username = top_chat_member.user.first_name
-        await msg.answer(f'{top_username} стал(а) королем токсичности, позор! Токсичные сообщения: {toxic_words[0]}')
+                    SELECT member_id, points 
+                    FROM {table_name}''')
+                rows = await cursor.fetchall()
+                tops = {row[0]: row[1] for row in rows}
+
+        sorted_top = sorted(tops.items(), key=lambda x: x[1], reverse=True)
+        if sorted_top[0][1] == 0:
+            message_data.append((chat_id, 'Топ пуст... Сначала станьте токсиками!'))
+        else:
+            message_data.append((chat_id, 'Внимание, друзьяшки! Топ токсичности за сегодня:'))
+
+            for member_id, points in sorted_top:
+                chat_member = await bot.get_chat_member(chat_id, member_id)
+                username = chat_member.user.first_name
+                message_data.append((chat_id, f'{username}: {points} баллов'))
+
+            async with aiosqlite.connect('chat_members.db') as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.execute(f'''
+                            SELECT toxic_words 
+                            FROM {table_name}
+                            WHERE member_id = ?
+                        ''', (sorted_top[0][0],))
+                    toxic_words = await cursor.fetchone()
+            top_member_id = sorted_top[0][0]
+            top_chat_member = await bot.get_chat_member(chat_id, top_member_id)
+            top_username = top_chat_member.user.first_name
+            message_data.append(
+                (chat_id, f'{top_username} стал(а) королем токсичности, позор! Токсичные сообщения: {toxic_words[0]}'))
+
+    for chat_id, message in message_data:
+        await bot.send_message(chat_id, message)
+async def start_scheduler():
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(top, 'cron', hour=22, minute=12)  # Вызов команды /top в 00:00 каждый день
+    scheduler.start()
 
 @router.message(Command('chat_stats'))
 async def chat_stats(msg: Message):
