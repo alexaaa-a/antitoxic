@@ -8,6 +8,7 @@ from aiogram import Dispatcher
 from aiogram.enums.parse_mode import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 import config
+import math
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram import F, Router, Bot
 from aiogram.types import Message
